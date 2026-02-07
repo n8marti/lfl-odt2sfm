@@ -3,8 +3,10 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from odf import text
 from odf.opendocument import load
+from odf.text import P
+
+from elements import Paragraph
 
 
 class Lesson:
@@ -42,7 +44,7 @@ class Lesson:
 
     @property
     def paragraphs(self):
-        return self.odt.getElementsByType(text.P)
+        return [Paragraph(p) for p in self.odt.getElementsByType(P)]
 
     @property
     def sfm(self):
@@ -53,9 +55,37 @@ class Lesson:
             out_text.append(f"\\c {self.number}")
         # Add lines from ODT document.
         for p in self.paragraphs:
-            sfm = self.sfm_ref.get(p.getAttribute("stylename"))
-            if sfm and len(str(p)) > 0:
-                out_text.append(f"{sfm} {p}")
+            # Ignore paragraphs with no style info.
+            if p.style is None:
+                continue
+            # Ignore paragraphs with no text.
+            if len(p.text) == 0:
+                continue
+
+            line = ""
+            # See if corresponding SFM exists in reference table.
+            sfm = self.sfm_ref.get(p.style)
+            if sfm:
+                line = f"{sfm} {p.text}"
+            if len(p.spans) > 0:
+                # If span text is identical to paragraph text, use the span's
+                # style instead of paragraph's style (e.g. ODT lists).
+                s1 = p.spans[0]
+                if p.text == s1.text:
+                    sfm = self.sfm_ref.get(s1.style)
+                    line = f"{sfm} {s1.text}"
+                # If span(s) are a subset of paragraph text, try to apply inline
+                # formatting.
+                else:
+                    for s in p.spans:
+                        sfm_inline = self.sfm_ref.get(s.style)
+                        if sfm_inline and len(s.text) > 0:
+                            s_inline = f"{sfm_inline} {s.text}{sfm_inline}*"
+                            line = line.replace(s.text, s_inline)
+
+            # Add SFM line.
+            if len(line) > 0:
+                out_text.append(line)
         return "\n".join(out_text)
 
     @property
@@ -76,9 +106,8 @@ class Lesson:
         if self._styles is None:
             styles = []
             for p in self.paragraphs:
-                style = str(p.getAttribute("stylename"))
-                if style not in styles:
-                    styles.append(style)
+                if p.style not in styles:
+                    styles.append(p.style)
             self._styles = styles
         return self._styles
 
@@ -88,6 +117,22 @@ class Lesson:
             raise ValueError("Must be instance of `dict`.")
         else:
             self._sfm_ref = value
+
+    def all_styles_and_paragraphs(self):
+        data = []
+        for p in self.paragraphs:
+            data.append(f"[{p.style}] {p.text}")
+            for s in p.spans:
+                data.append(f"> [{s.style}] {s.text}")
+        return data
+
+    def export_sfm(self):
+        outfile = Path(self.name).with_suffix(".sfm")
+        outfile.write_text(self.sfm)
+
+    def export_styles_and_text(self):
+        outfile = Path(self.name).with_suffix(".txt")
+        outfile.write_text("\n".join(self.all_styles_and_paragraphs()))
 
 
 class Toc(Lesson):
@@ -162,7 +207,9 @@ class Book:
     @property
     def lessons(self):
         lessons = list()
-        lesson_files = sorted([f for f in self.dir_path.iterdir()])
+        lesson_files = sorted(
+            [f for f in self.dir_path.iterdir() if f.suffix == ".odt"]
+        )
         last_file = lesson_files.pop()
         toc_lesson = None
         if "TOC" in last_file.name:
@@ -199,9 +246,15 @@ class Book:
     def timestamp(self):
         return datetime.today().strftime("%Y-%m-%d %H:%M:%S")
 
+    def export_sfm(self):
+        raise NotImplementedError
+        # outfile = Path(self.name).with_suffix(".sfm")
+        # outfile.write_text(self.sfm)
 
-def print_sfm(book):
-    print(book.sfm)
+
+def print_sfm(item):
+    """Print full book's or single lesson's SFM-encoded text."""
+    print(item.sfm)
 
 
 def print_styles(book):
@@ -222,7 +275,10 @@ def print_styles(book):
 def main():
     book = Book(sys.argv[1])
     # print_styles(book)
-    print_sfm(book)
+    # print_sfm(book)
+    lesson = book.lessons[1]
+    lesson.export_sfm()
+    lesson.export_styles_and_text()
 
 
 if __name__ == "__main__":
