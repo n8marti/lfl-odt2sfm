@@ -1,7 +1,7 @@
-from odf.text import Span as ODTSpan
+from odf.text import Span
 
 
-class Element:
+class OdtElement:
     def __init__(self, element):
         self._element = element
 
@@ -13,16 +13,16 @@ class Element:
         return str(self)
 
 
-class Span(Element):
+class OdtSpan(OdtElement):
     @property
     def style(self):
         return self._element.getAttribute("stylename")
 
 
-class Paragraph(Element):
+class OdtParagraph(OdtElement):
     @property
     def spans(self):
-        return [Span(s) for s in self._element.getElementsByType(ODTSpan)]
+        return [OdtSpan(s) for s in self._element.getElementsByType(Span)]
 
     @property
     def style(self):

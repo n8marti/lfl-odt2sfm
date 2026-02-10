@@ -1,0 +1,14 @@
+\id XXA Book title information, etc.
+\c 1
+\s Section Header
+\p
+\v 1 1st verse--nothing fancy.
+\v 2 2nd verse with some \b bolded\b* text.
+\p
+\v 3 3rd verse, but now 2nd paragraph.
+\s A 2nd Section Header
+\q
+\v 4 Whatever a verse as "q" is (poetry?)
+\c 2
+\s2 "H2" Section Header
+\v 1 Yet another verse, but the first one of a new chapter.

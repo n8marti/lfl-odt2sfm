@@ -1,16 +1,18 @@
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
 
 from odf.opendocument import load
 from odf.text import P
 
-from odt.elements import OdtParagraph
+from .elements import OdtParagraph
 
 
-class Lesson:
-    REGEX_2DIGITS = re.compile(r"[0-9]{2}")
+class OdtChapter:
+    """One "lesson" ODT file in "Lessons from Luke", which corresponds to a
+    "chapter" in Paratext."""
+
+    RE_2_DIGITS = re.compile(r"[0-9]{2}")
 
     def __init__(self, file_path=None):
         if file_path is None:
@@ -32,7 +34,7 @@ class Lesson:
 
     @property
     def number(self):
-        num_match = re.search(self.REGEX_2DIGITS, self.file_path.stem)
+        num_match = self.RE_2_DIGITS.search(self.file_path.stem)
         if "TOC" in self.file_path.name:
             return 0
         elif num_match:
@@ -92,7 +94,7 @@ class Lesson:
     def sfm_ref(self):
         if not self._sfm_ref:
             self._sfm_ref = dict()
-            ref_file = Path("ref.txt")
+            ref_file = Path(__file__).parents[2] / "ref.txt"
             for line in ref_file.read_text().splitlines():
                 try:
                     k, v = line.split("\\")
@@ -135,8 +137,8 @@ class Lesson:
         outfile.write_text("\n".join(self.all_styles_and_paragraphs()))
 
 
-class Toc(Lesson):
-    REGEX_LETTERBEFOREDIGITS = re.compile(r"(?<=[a-z])[0-9]+")
+class OdtToc(OdtChapter):
+    RE_LETTER_BEFORE_DIGITS = re.compile(r"(?<=[a-z])[0-9]+")
     INTRO_MARKERS = (
         "\\mt",
         "\\s",
@@ -161,7 +163,8 @@ class Toc(Lesson):
     @classmethod
     def to_intro_sfm(cls, sfm):
         # Strip any #s from SFM tags.
-        sfm_plain = re.sub(cls.REGEX_LETTERBEFOREDIGITS, "", sfm)
+        # sfm_plain = re.sub(cls.RE_LETTER_BEFORE_DIGITS, "", sfm)
+        sfm_plain = cls.RE_LETTER_BEFORE_DIGITS.sub("", sfm)
         if sfm_plain in cls.INTRO_MARKERS:
             # Get trailing digits.
             sfm_digits = sfm.split(sfm_plain)[1]
@@ -172,6 +175,9 @@ class Toc(Lesson):
 
 
 class Book:
+    """The full content of all of "Lessons from Luke" lessons, which is a
+    sequence of ODT files in a single parent folder."""
+
     def __init__(self, dir=None, lang=None):
         self._dir_path = None
         self._language = lang
@@ -214,14 +220,14 @@ class Book:
         toc_lesson = None
         if "TOC" in last_file.name:
             # File is Table of Contents.
-            toc_lesson = Toc(last_file)
+            toc_lesson = OdtToc(last_file)
             # Put lesson at the beginning.
             lessons.append(toc_lesson)
         for lf in lesson_files:
-            lessons.append(Lesson(lf))
+            lessons.append(OdtChapter(lf))
         if toc_lesson is None:
             # Re-add last lesson file.
-            lessons.append(Lesson(last_file))
+            lessons.append(OdtChapter(last_file))
         return lessons
 
     @property
@@ -270,16 +276,3 @@ def print_styles(book):
     print("All styles:")
     for i, style in enumerate(all_styles):
         print(f" {i:2d}: {style}")
-
-
-def main():
-    book = Book(sys.argv[1])
-    # print_styles(book)
-    # print_sfm(book)
-    lesson = book.lessons[1]
-    lesson.export_sfm()
-    lesson.export_styles_and_text()
-
-
-if __name__ == "__main__":
-    main()
