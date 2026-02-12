@@ -75,12 +75,12 @@ class SfmSpan(SfmElement):
     @property
     def text(self):
         if self._text is None:
-            self._text = super().text
-        text = self._text
-        # Check for trailing SFM marker.
-        if self.end_marker and self.end_marker.rstrip("*") == self.marker:
-            # Remove "closing" marker.
-            self._text = text.removesuffix(self.end_marker)
+            # Initialize and remove leading SFM marker.
+            text = super().text
+            # Check for trailing SFM marker.
+            if self.end_marker and self.end_marker.rstrip("*") == self.marker:
+                # Remove "closing" marker.
+                self._text = text.removesuffix(self.end_marker)
         return self._text
 
 
@@ -116,3 +116,12 @@ class SfmParagraph(SfmElement):
             last_part_init = part_init
             last_part_text = part_text
         return spans
+
+    @property
+    def text(self):
+        if self._text is None:
+            # Initialize and remove leading SFM marker.
+            self._text = super().text
+        # FIXME: Remove any verse or span SFM markers.
+        # text = self._text
+        return self._text

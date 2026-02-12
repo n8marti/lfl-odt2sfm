@@ -66,7 +66,7 @@ class TestSfmChapter(unittest.TestCase):
             "\\v 3 3rd verse, but now 2nd paragraph.\n"
             "\\s A 2nd Section Header\n"
             "\\q\n"
-            '\\v 4 Whatever a verse as "q" is (poetry?)'
+            '\\v 4 Whatever a verse as "q" is (poetry?)\n'
         )
 
     def test_chapter_number(self):

@@ -1,9 +1,9 @@
 import re
-from datetime import datetime
 from pathlib import Path
 
+from odf.element import Node
+from odf.namespaces import TEXTNS
 from odf.opendocument import load
-from odf.text import P
 
 from .elements import OdtParagraph
 
@@ -22,11 +22,10 @@ class OdtChapter:
         if not self.file_path.is_file():
             raise ValueError(f"File does not exist: {self.file_path}")
 
+        self._odt = None
         self._sfm_ref = None
+        self._all_styles = None
         self._styles = None
-
-    def __str__(self):
-        return self.name
 
     @property
     def name(self):
@@ -42,11 +41,64 @@ class OdtChapter:
 
     @property
     def odt(self):
-        return load(self.file_path)
+        if self._odt is None:
+            self._odt = load(self.file_path)
+        return self._odt
+
+    @property
+    def all_paragraphs(self):
+        """Return all elements from ODT file defined as either a header or a
+        paragraph. Note: Some definied paragraphs have no text, some have no
+        defined style, and some are not intended to be user-editable."""
+
+        return [
+            OdtParagraph(p) for p in self._get_elements_by_nstypes(self.odt, ("h", "p"))
+        ]
+
+    def _get_elements_by_nstypes(self, node, nstypes, accumulator=list()):
+        qnames = [(TEXTNS, t) for t in nstypes]
+
+        # If "node" is a document, choose its top Node.
+        if not hasattr(node, "qname"):
+            node = node.topnode
+
+        if node.qname in qnames:
+            accumulator.append(node)
+
+        for e in node.childNodes:
+            if e.nodeType == Node.ELEMENT_NODE:
+                accumulator = self._get_elements_by_nstypes(e, nstypes, accumulator)
+
+        return accumulator
 
     @property
     def paragraphs(self):
-        return [OdtParagraph(p) for p in self.odt.getElementsByType(P)]
+        """Return list of user-editable paragraphs."""
+        paragraphs = []
+        for p in self.all_paragraphs:
+            if len(p.text) == 0:
+                continue
+            if p.style in self.styles:
+                paragraphs.append(p)
+        return paragraphs
+
+    @property
+    def styles(self):
+        """Return list of valid styles for user-editable paragraphs."""
+
+        if self._styles is None:
+            styles = dict()
+            for p in self.all_paragraphs:
+                # Ignore paragraphs with no style info.
+                if p.style is None:
+                    continue
+                # Ignore paragraphs with no text.
+                if len(p.text) == 0:
+                    continue
+                if p.style in self.sfm_ref.keys():
+                    styles[p.style] = self.sfm_ref.get(p.style)
+            self._styles = styles
+        return self._styles
 
     @property
     def sfm(self):
@@ -103,16 +155,6 @@ class OdtChapter:
                     raise ValueError(f"{e}: {line}")
         return self._sfm_ref
 
-    @property
-    def styles(self):
-        if self._styles is None:
-            styles = []
-            for p in self.paragraphs:
-                if p.style not in styles:
-                    styles.append(p.style)
-            self._styles = styles
-        return self._styles
-
     @sfm_ref.setter
     def sfm_ref(self, value):
         if not isinstance(value, dict):
@@ -120,21 +162,39 @@ class OdtChapter:
         else:
             self._sfm_ref = value
 
+    @property
+    def all_styles(self):
+        if self._all_styles is None:
+            styles = []
+            for p in self.paragraphs:
+                if p.style not in styles:
+                    styles.append(p.style)
+            self._all_styles = styles
+        return self._all_styles
+
     def all_styles_and_paragraphs(self):
         data = []
-        for p in self.paragraphs:
+        for p in self.all_paragraphs:
             data.append(f"[{p.style}] {p.text}")
             for s in p.spans:
                 data.append(f"> [{s.style}] {s.text}")
         return data
 
-    def export_sfm(self):
-        outfile = Path(self.name).with_suffix(".sfm")
-        outfile.write_text(self.sfm)
+    # def save(self):
+    #     path = Path(outfile_path)
+    #     if not path.is_file():
+    #         raise FileNotFoundError
 
-    def export_styles_and_text(self):
-        outfile = Path(self.name).with_suffix(".txt")
-        outfile.write_text("\n".join(self.all_styles_and_paragraphs()))
+    # def export_sfm(self):
+    #     outfile = Path(self.name).with_suffix(".sfm")
+    #     outfile.write_text(self.sfm)
+
+    # def export_styles_and_text(self):
+    #     outfile = Path(self.name).with_suffix(".txt")
+    #     outfile.write_text("\n".join(self.all_styles_and_paragraphs()))
+
+    def __str__(self):
+        return self.name
 
 
 class OdtToc(OdtChapter):
@@ -174,7 +234,7 @@ class OdtToc(OdtChapter):
             return sfm
 
 
-class Book:
+class OdtBook:
     """The full content of all of "Lessons from Luke" lessons, which is a
     sequence of ODT files in a single parent folder."""
 
@@ -211,63 +271,49 @@ class Book:
         self._language = str(value)
 
     @property
-    def lessons(self):
-        lessons = list()
-        lesson_files = sorted(
+    def chapters(self):
+        chapters = list()
+        chapter_files = sorted(
             [f for f in self.dir_path.iterdir() if f.suffix == ".odt"]
         )
-        last_file = lesson_files.pop()
-        toc_lesson = None
+        last_file = chapter_files.pop()
+        toc_chapter = None
         if "TOC" in last_file.name:
             # File is Table of Contents.
-            toc_lesson = OdtToc(last_file)
+            toc_chapter = OdtToc(last_file)
             # Put lesson at the beginning.
-            lessons.append(toc_lesson)
-        for lf in lesson_files:
-            lessons.append(OdtChapter(lf))
-        if toc_lesson is None:
+            chapters.append(toc_chapter)
+        for lf in chapter_files:
+            chapters.append(OdtChapter(lf))
+        if toc_chapter is None:
             # Re-add last lesson file.
-            lessons.append(OdtChapter(last_file))
-        return lessons
+            chapters.append(OdtChapter(last_file))
+        return chapters
 
     @property
     def name(self):
         return self.dir_path.name
 
-    @property
-    def sfm(self):
-        # Initialize data.
-        out_text = list()
-        # Add "book" info.
-        out_text.append(
-            f'\\id XXA "{self.name}"; generated by "{__file__}" at {self.timestamp}'
-        )
-        out_text.append("\\usfm 3.0")
-        # Add lines from lessons.
-        for lesson in self.lessons:
-            out_text.append(lesson.sfm)
-        return "\n".join(out_text)
-
-    @property
-    def timestamp(self):
-        return datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-
-    def export_sfm(self):
-        raise NotImplementedError
-        # outfile = Path(self.name).with_suffix(".sfm")
-        # outfile.write_text(self.sfm)
-
-
-def print_sfm(item):
-    """Print full book's or single lesson's SFM-encoded text."""
-    print(item.sfm)
+    # @property
+    # def sfm(self):
+    #     # Initialize data.
+    #     out_text = list()
+    #     # Add "book" info.
+    #     out_text.append(
+    #         f'\\id XXA "{self.name}"; generated by "{__file__}" at {self.timestamp()}'
+    #     )
+    #     out_text.append("\\usfm 3.0")
+    #     # Add lines from lessons.
+    #     for chapter in self.chapters:
+    #         out_text.append(chapter.sfm)
+    #     return "\n".join(out_text)
 
 
 def print_styles(book):
     all_styles = []
-    for lesson in book.lessons:
-        print(lesson.name)
-        for i, style in enumerate(sorted(lesson.styles)):
+    for chapter in book.chapters:
+        print(chapter.name)
+        for i, style in enumerate(sorted(chapter.styles)):
             if style not in all_styles:
                 all_styles.append(style)
             print(f" {i:2d}: {style}")

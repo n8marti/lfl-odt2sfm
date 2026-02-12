@@ -1,6 +1,8 @@
 import re
 from pathlib import Path
 
+from .elements import SfmParagraph
+
 
 class SfmChapter:
     """A complete SFM Chapter, with one or more paragraphs and zero or more verses."""
@@ -9,21 +11,38 @@ class SfmChapter:
         self._number = None
         self._odt_styles = None
         self._sfm_raw = None
-        self._verses = None
         if raw_sfm is not None:
             self.sfm_raw = raw_sfm
 
     @property
     def number(self):
         if self._number is None:
-            m = re.match(r"^\\c ([0-9]+)", self.sfm_raw)
+            m = re.match(r"^\\c ([0-9]+)?", self.sfm_raw)
             if m:
-                self._number = int(m[1])
-            else:
-                raise ValueError(
-                    f"No chapter number found: {self.sfm_raw.splitlines()[0]}..."
-                )
+                # \\c marker was found; check for chapter number.
+                if m[1] is not None:
+                    self._number = int(m[1])
+                else:
+                    raise ValueError(
+                        f"No chapter number found after \\c marker: {m[0]}"
+                    )
         return self._number
+
+    @property
+    def paragraphs(self):
+        """A multiline text with a specific, defined style. It may also contain
+        "spans" or "verses", which might have their own, character-level styles."""
+
+        paragraphs = []
+        # init = True
+        # for line in re.split(r"\\[a-z]+[0-9]* ", self.sfm_raw):
+        for line in self.sfm_raw.splitlines():
+            if line.startswith("\\c"):
+                continue
+            elif line.startswith("\\v"):
+                continue
+            paragraphs.append(SfmParagraph(line))
+        return paragraphs
 
     @property
     def odt_styles(self):
@@ -40,7 +59,7 @@ class SfmChapter:
                     styles[v].append(k)
                 except ValueError as e:
                     raise ValueError(f"{e}: {line}")
-            self._odt_styles = styles.copy()
+            self._odt_styles = styles
         return self._odt_styles
 
     @property
@@ -53,45 +72,40 @@ class SfmChapter:
 
     @property
     def verses(self):
-        if self._verses is None:
-            verses = []
-            init = True
-            for v in re.split(r"\\v ", self.sfm_raw):
-                if init:  # skip first "split", which is not a verse
-                    init = False
-                    continue
-                sfm_raw = f"\\v {v.rstrip()}"
-                # TODO: Do we need to preserve chapter numbers for some reason?
-                verses.append(sfm_raw)
-            self._verses = verses.copy()
-        return self._verses
+        verses = []
+        init = True
+        for v in re.split(r"\\v ", self.sfm_raw):
+            if init:  # skip first "split", which is not a verse
+                init = False
+                continue
+            sfm_raw = f"\\v {v.rstrip()}"
+            # TODO: Do we need to preserve chapter numbers for some reason?
+            verses.append(sfm_raw)
+        return verses
 
     def __str__(self):
         return self.sfm_raw
 
 
 class SfmBook:
-    """A complete SFM file with one or more Chapters."""
+    """A complete SFM file with one or more Chapters.
+    The data is read from the source file. Any changes are written to a new
+    destination file."""
 
-    def __init__(self, file_path=None):
+    def __init__(self, file_path=None, odt_dir_path=None):
         self._chapters = None
-        self._file_path = None
+        self.file_path = None
+        if file_path is not None:
+            self.file_path = Path(file_path)
         self._id_text = None
         self._name = None
+        self.odt_dir_path = None
+        if odt_dir_path is not None:
+            self.odt_dir_path = Path(odt_dir_path)
         self._sfm_raw = None
-        if file_path is not None:
-            self.file_path = file_path
 
     def __str__(self):
         return self.name
-
-    @property
-    def file_path(self):
-        return self._file_path
-
-    @file_path.setter
-    def file_path(self, value):
-        self._file_path = Path(value)
 
     @property
     def id_text(self):
@@ -123,10 +137,10 @@ class SfmBook:
             init = True
             for c in re.split(r"\\c ", self.sfm_raw):
                 if init:
-                    sfm_raw = c.rstrip()
+                    sfm_raw = c.rstrip(" ")
                     init = False
                 else:
-                    sfm_raw = f"\\c {c.rstrip()}"
+                    sfm_raw = f"\\c {c.rstrip(' ')}"
                 # TODO: Do we need to preserve chapter numbers for some reason?
                 chapters.append(SfmChapter(sfm_raw))
             self._chapters = chapters.copy()
