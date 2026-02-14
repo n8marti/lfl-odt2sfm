@@ -23,18 +23,20 @@ class TestSfmElements(unittest.TestCase):
     def test_paragraph_spans(self):
         markers = ["\\v", "\\b", "\\it"]
         end_markers = [None, "\\b*", "\\it*"]
-        texts = ["23", "bolded", "italicized"]
+        stexts = ["23", "bolded ", "italicized"]
+        texts = [" This is a line of ", "and ", " text."]
         sfm_raws = [
-            f"{markers[0]} {texts[0]}",
-            f"{markers[1]} {texts[1]}{end_markers[1]}",
-            f"{markers[2]} {texts[2]}{end_markers[2]}",
+            f"{markers[0]} {stexts[0]}",
+            f"{markers[1]} {stexts[1]}{end_markers[1]}",
+            f"{markers[2]} {stexts[2]}{end_markers[2]}",
         ]
-        p_sfm = f"{sfm_raws[0]} This is a line of {sfm_raws[1]} and {sfm_raws[2]} text."
+        p_sfm = f"{sfm_raws[0]}{texts[0]}{sfm_raws[1]}{texts[1]}{sfm_raws[2]}{texts[2]}"
         p = SfmParagraph(p_sfm)
         self.assertEqual(sfm_raws, [s.sfm_raw for s in p.spans])
-        self.assertEqual(texts, [s.text for s in p.spans])
+        self.assertEqual(stexts, [s.text for s in p.spans])
         self.assertEqual(markers, [s.marker for s in p.spans])
         self.assertEqual(end_markers, [s.end_marker for s in p.spans])
+        self.assertEqual(texts, p.texts)
 
     def test_sfm_raw(self):
         self.assertEqual(self.element_input, self.element.sfm_raw)

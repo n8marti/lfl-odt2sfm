@@ -4,6 +4,8 @@ from pathlib import Path
 from odf.element import Node
 from odf.namespaces import TEXTNS
 from odf.opendocument import load
+from odf.teletype import extractText
+from odf.text import Span
 
 from .elements import OdtParagraph
 
@@ -28,6 +30,18 @@ class OdtChapter:
         self._styles = None
 
     @property
+    def all_paragraphs(self):
+        """Return all elements from ODT file defined as either a header or a
+        paragraph. Note: Some definied paragraphs have no text, some have no
+        defined style, and some are not intended to be user-editable."""
+
+        return [p for p in self._get_elements_by_nstypes(self.odt, ("h", "p"))]
+
+    @property
+    def all_spans(self):
+        return [s for s in self._get_elements_by_nstypes(self.odt, ("span",))]
+
+    @property
     def name(self):
         return self.file_path.name
 
@@ -45,18 +59,12 @@ class OdtChapter:
             self._odt = load(self.file_path)
         return self._odt
 
-    @property
-    def all_paragraphs(self):
-        """Return all elements from ODT file defined as either a header or a
-        paragraph. Note: Some definied paragraphs have no text, some have no
-        defined style, and some are not intended to be user-editable."""
-
-        return [
-            OdtParagraph(p) for p in self._get_elements_by_nstypes(self.odt, ("h", "p"))
-        ]
-
-    def _get_elements_by_nstypes(self, node, nstypes, accumulator=list()):
+    def _get_elements_by_nstypes(self, node, nstypes, accumulator=None):
+        """Return valid "paragraph" elements in document order to preserve
+        indexing."""
         qnames = [(TEXTNS, t) for t in nstypes]
+        if accumulator is None:
+            accumulator = list()
 
         # If "node" is a document, choose its top Node.
         if not hasattr(node, "qname"):
@@ -75,28 +83,31 @@ class OdtChapter:
     def paragraphs(self):
         """Return list of user-editable paragraphs."""
         paragraphs = []
-        for p in self.all_paragraphs:
-            if len(p.text) == 0:
+        for p_node in self.all_paragraphs:
+            if len(extractText(p_node)) == 0:
                 continue
-            if p.style in self.styles:
-                paragraphs.append(p)
+            if p_node.getAttribute("stylename") in self.styles:
+                paragraphs.append(OdtParagraph(p_node, chapter=self))
         return paragraphs
 
     @property
     def styles(self):
-        """Return list of valid styles for user-editable paragraphs."""
+        """Return list of valid styles for translatable paragraphs and spans."""
 
         if self._styles is None:
             styles = dict()
-            for p in self.all_paragraphs:
-                # Ignore paragraphs with no style info.
-                if p.style is None:
+            nodes = [n for n in self.all_paragraphs]
+            nodes.extend([n for n in self.all_spans])
+            for node in nodes:
+                # Ignore spans with no style info.
+                if node.getAttribute("stylename") is None:
                     continue
-                # Ignore paragraphs with no text.
-                if len(p.text) == 0:
+                # Ignore spans with no text.
+                if len(extractText(node)) == 0:
                     continue
-                if p.style in self.sfm_ref.keys():
-                    styles[p.style] = self.sfm_ref.get(p.style)
+                style_name = node.getAttribute("stylename")
+                if style_name in self.sfm_ref.keys():
+                    styles[style_name] = self.sfm_ref.get(style_name)
             self._styles = styles
         return self._styles
 
@@ -173,6 +184,7 @@ class OdtChapter:
         return self._all_styles
 
     def all_styles_and_paragraphs(self):
+        raise NotImplementedError
         data = []
         for p in self.all_paragraphs:
             data.append(f"[{p.style}] {p.text}")

@@ -1,3 +1,5 @@
+MP2 \ip
+MP3 \im
 P23 \mt1
 M.T._20_Text_20_-_20_Lesson_20_Title_20_Scrip_20_Reference  \mt2
 Part_20_Heading \ms1
@@ -34,9 +36,5 @@ P18 \s2
 P25 \s1
 M.T._20_Coloring_20_Page_20_-_20_Memory_20_Verse    \p
 P24 \s1
-MP2 \p
-MP3 \pm
 Body_20_8_20_pt \m
-MP1 \p
-Footer  \p
 Front_20_Matter_20_footer   \rem

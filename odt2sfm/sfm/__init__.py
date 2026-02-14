@@ -34,10 +34,10 @@ class SfmChapter:
         "spans" or "verses", which might have their own, character-level styles."""
 
         paragraphs = []
-        # init = True
-        # for line in re.split(r"\\[a-z]+[0-9]* ", self.sfm_raw):
         for line in self.sfm_raw.splitlines():
-            if line.startswith("\\c"):
+            if len(line) == 0:
+                continue
+            elif line.startswith("\\c"):
                 continue
             elif line.startswith("\\v"):
                 continue

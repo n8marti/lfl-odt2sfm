@@ -5,6 +5,9 @@ class SfmElement:
     """Text that begins with an SFM."""
 
     RE_SFM_INIT = re.compile(r"^\\[a-z]+[0-9]*( [0-9]+)* ")
+    SFM_PLACEHOLDERS = {
+        "~": "\u00a0",
+    }
 
     def __init__(self, raw_text, odt_style=None):
         self._marker = None
@@ -44,8 +47,19 @@ class SfmElement:
         if self._text is None:
             # Remove leading SFM marker.
             text = self.sfm_raw.removeprefix(f"{self.marker} ")
-            self._text = text
+            sanitized_text = self._sanitize(text)
+            self._text = sanitized_text
         return self._text
+
+    @classmethod
+    def _sanitize(cls, text):
+        sanitized_text = ""
+        for c in text:
+            sanitized_text += cls.SFM_PLACEHOLDERS.get(c, c)
+        return sanitized_text
+
+    def __str__(self):
+        return self.sfm_raw
 
 
 class SfmSpan(SfmElement):
@@ -80,7 +94,8 @@ class SfmSpan(SfmElement):
             # Check for trailing SFM marker.
             if self.end_marker and self.end_marker.rstrip("*") == self.marker:
                 # Remove "closing" marker.
-                self._text = text.removesuffix(self.end_marker)
+                text = text.removesuffix(self.end_marker)
+            self._text = self._sanitize(text)
         return self._text
 
 
@@ -104,14 +119,14 @@ class SfmParagraph(SfmElement):
                 continue
             # FIXME: Again, we're making a big assumption that any "* " is
             # always the end of a span-closing marker.
-            part_init, part_text = part.split(" ", maxsplit=1)
+            part_init, s, part_text = re.split(r"( |\*)", part, maxsplit=1)
             if part_init == "v":  # verses are special kinds of spans
                 v_num = part_text.split(" ", maxsplit=1)[0]
                 sfm_raw = f"\\v {v_num}"
                 part_text = v_num
                 spans.append(SfmSpan(sfm_raw))
-            elif part_init.endswith("*") and part_init.rstrip("*") == last_part_init:
-                sfm_raw = f"\\{last_part_init} {last_part_text}\\{part_init}"
+            elif s == "*" and part_init == last_part_init:
+                sfm_raw = f"\\{last_part_init} {last_part_text}\\{part_init}{s}"
                 spans.append(SfmSpan(sfm_raw))
             last_part_init = part_init
             last_part_text = part_text
@@ -121,7 +136,25 @@ class SfmParagraph(SfmElement):
     def text(self):
         if self._text is None:
             # Initialize and remove leading SFM marker.
-            self._text = super().text
-        # FIXME: Remove any verse or span SFM markers.
-        # text = self._text
+            text = super().text
+            # TODO: Remove any verse or span SFM markers?
+            # text = self._text
+            self._text = self._sanitize(text)
         return self._text
+
+    @property
+    def texts(self):
+        texts = []
+        if self.spans:  # texts are only relevant if there are spans
+            if self.marker[1] == "v":  # don't remove verse marker if present
+                text_init = self.sfm_raw
+            else:
+                text_init = self.sfm_raw.removeprefix(self.marker)
+            remainder = text_init
+            for s in self.spans:
+                t, remainder = remainder.split(s.sfm_raw, maxsplit=1)
+                if t and t.replace(" ", "") != "":
+                    texts.append(self._sanitize(t))
+            if remainder != text_init:
+                texts.append(self._sanitize(remainder))
+        return texts
