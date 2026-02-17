@@ -1,5 +1,6 @@
+import unicodedata
+
 from odf.element import Node
-from odf.namespaces import TEXTNS
 from odf.teletype import extractText
 
 
@@ -7,57 +8,54 @@ class OdtElement:
     def __init__(self, element, chapter=None):
         self.node = element
         self.chapter = None
+        # FIXME: Normalization form should come from ODT file somehow.
+        self.normalization_form = "NFC"
         if chapter:
             self.chapter = chapter
+
+    @property
+    def all_children(self):
+        return self.node.childNodes
 
     @property
     def parent(self):
         return self.node.parentNode
 
     @property
+    def path(self):
+        node = self.node
+        path = [node.qname[1] if node.nodeType == Node.ELEMENT_NODE else str(node)]
+        while node.parentNode is not None:
+            path.insert(0, node.parentNode.qname[1])
+            node = node.parentNode
+        return "/".join(path)
+
+    @property
     def text(self):
         # Note: Using extractText allows special spacings (e.g. line breaks,
-        # tabs, multiple spaces) to be properly converted to unicode.
-        return self._extract_text()
+        # tabs, multiple spaces) to be properly converted to unicode, but this
+        # misrepresents whether or not the SFM text has been changed from the
+        # original ODT text, since those special spacings aren't exported as
+        # editable in the SFM output.
+        # return extractText(self.node)
+        return str(self.node)
 
-    def _extract_text(self, before_span=False):
-        """Extract text content from an Element, with whitespace represented
-        properly. Returns the text, with tabs, spaces, and newlines
-        correctly evaluated. This method recursively descends through the
-        children of the given element, accumulating text and "unwrapping"
-        <text:s>, <text:tab>, and <text:line-break> elements along the way.
-        """
-        result = []
-
-        if len(self.node.childNodes) != 0:
-            for child in self.node.childNodes:
-                if child.nodeType == Node.TEXT_NODE:
-                    result.append(child.data)
-                elif child.nodeType == Node.ELEMENT_NODE:
-                    sub_element = child
-                    tag_name = sub_element.qname
-                    if before_span is True and tag_name == (TEXTNS, "span"):
-                        # Don't "gather" text from span elements.
-                        break
-                    if tag_name == (TEXTNS, "line-break"):
-                        result.append("\n")
-                    elif tag_name == (TEXTNS, "tab"):
-                        result.append("\t")
-                    elif tag_name == (TEXTNS, "s"):
-                        c = sub_element.getAttribute("c")
-                        if c:
-                            spaceCount = int(c)
-                        else:
-                            spaceCount = 1
-
-                        result.append(" " * spaceCount)
-                    else:
-                        result.append(extractText(sub_element))
-
-        return "".join(result)
+    def _normalize(self, text):
+        """Normalize foreign text according to current document preferences."""
+        return unicodedata.normalize(self.normalization_form, text)
 
     def __str__(self):
         return self.text
+
+
+class OdtText(OdtElement):
+    @property
+    def data(self):
+        return self.node.data
+
+    @property
+    def text(self):
+        return self.data
 
 
 class OdtSpan(OdtElement):
@@ -68,6 +66,23 @@ class OdtSpan(OdtElement):
 
 class OdtParagraph(OdtElement):
     @property
+    def children(self):
+        children = []
+        for node in self.all_children:
+            if node.nodeType == Node.TEXT_NODE:
+                if len(node.data) > 0:  # ignore nodes with zero characters
+                    # print(f"|{node.data}|")
+                    children.append(node)
+            elif node.nodeType == Node.ELEMENT_NODE:
+                if node.qname[1] == "span":
+                    # from sys import stdout
+
+                    # print(node.toXml(0, stdout))
+                    if node.getAttribute("stylename") in self.chapter.styles:
+                        children.append(node)
+        return children
+
+    @property
     def spans(self):
         def descendent_of_node(node, ancestor):
             while node:
@@ -77,6 +92,7 @@ class OdtParagraph(OdtElement):
                 node = node.parentNode
 
         spans = []
+        # FIXME: Loop through self.node.getElementsByType instead.
         for s_node in self.chapter.all_spans:
             # Ignore spans that are contained within other paragraphs.
             if not descendent_of_node(s_node, self.node):
@@ -94,63 +110,89 @@ class OdtParagraph(OdtElement):
     def style(self):
         return self.node.getAttribute("stylename")
 
-    @property
-    def texts(self):
-        texts = []
-        if self.spans:  # texts are only relevant if there are spans
-            for c in self.node.childNodes:
-                if c.nodeType == Node.TEXT_NODE and c.data.replace(" ", "") != "":
-                    texts.append(c)
-        return texts
+    # @property
+    # def texts(self):
+    #     texts = []
+    #     if self.spans:  # texts are only relevant if there are spans
+    #         for c in self.node.childNodes:
+    #             if c.nodeType == Node.TEXT_NODE and c.data.replace(" ", "") != "":
+    #                 texts.append(c)
+    #     else:
+    #         # Assume first Text node is paragraph text.
+    #         for c in self.node.childNodes:
+    #             if c.nodeType == Node.TEXT_NODE:
+    #                 # TODO: What if 1st text node is a space/tab/line-break?
+    #                 print(f"{c.data=}")
+    #                 texts.append(c)
+    #                 break
+    #     return texts
 
     def update_text(self, sfm_paragraph):
+        """Starting with the paragraph node, recursively check for Text nodes
+        and update their data if needed."""
         # Only proceed if overall paragraph text is different.
-        if self.text == sfm_paragraph.text:
+        if self.text == self._normalize(sfm_paragraph.text):
+            print(f"Skipping unchanged paragraph: {sfm_paragraph.text[:20]}...")
+            return
+        # print(f"\n{self.text}\n{self._normalize(sfm_paragraph.text)}\n")
+        odt_ct = len(self.children)
+        sfm_ct = len(sfm_paragraph.children)
+        if odt_ct != sfm_ct:
+            print(f"Warning: Unmatched children for ODT ({odt_ct}) & SFM ({sfm_ct})")
+            print([c.__class__.__name__ for c in self.children])
+            texts = []
+            for c in self.children:
+                if c.nodeType == Node.TEXT_NODE:
+                    texts.append(c.data)
+                else:
+                    texts.append(str(c))
+            print(texts)
+            print([c.__class__.__name__ for c in sfm_paragraph.children])
+            print([c.text for c in sfm_paragraph.children])
+            print(extractText(self.node))
+            print()
             return
 
-        if len(self.spans) != len(sfm_paragraph.spans):
-            print(
-                f"Warning: different span count than SFM paragraph: {len(self.spans)} vs {len(sfm_paragraph.spans)}"
-            )
-            return
-        if len(self.texts) != len(sfm_paragraph.texts):
-            print(
-                f"Warning: different text element count than SFM paragraph: {len(self.texts)} vs {len(sfm_paragraph.texts)}"
-            )
-            return
         self._update_node_text(self.node, sfm_paragraph)
 
     def _update_node_text(self, node, sfm_paragraph):
-        """Update node text by editing Text child nodes recursively."""
+        """Update node text by editing child Text nodes recursively."""
+
+        # def compare_nodes(node, children):
+        #     idx = None
+        #     for i, n in enumerate(self.children):
+        #         if node is n:
+        #             idx = i
+        #     if idx is not None:
+        #         return id
+        # if hasattr(node, "qname"):
+        #     print(f"{node.qname[1]=}")
+        print(
+            f"{self.node.qname[1]}:{[c.qname[1] for c in self.children if hasattr(c, 'qname')]}"
+        )
+
+        idx = None
+        for i, n in enumerate(self.children):
+            if node is n:
+                idx = i
+                break
+        if idx is None:
+            # Node does not have updatable text.
+            print(
+                f"Skipping ignored node: {node.parentNode.qname[1]}/{node.qname[1]}: {str(node)}"
+            )
+            # print(f"{self.node=}; {self.children=}")
+            # print(f"{[n.__class__.__name__ for n in node.childNodes]}")
+            return
+
+        sfm_text = self._normalize(sfm_paragraph.children[idx])
         if node.nodeType == Node.TEXT_NODE:
-            idx = None
-            for i, t in enumerate(self.texts):
-                if node is t:
-                    idx = i
-                    break
-            if idx is None:
-                return
-            sfm_text = sfm_paragraph.texts[idx]
-            if sfm_text != node.data:
+            if node.data != sfm_text:
+                print(
+                    f"Updating text for: {node.parentNode.getAttribute('stylename')}; from '{node.data}' to '{sfm_text}'"
+                )
                 node.data = sfm_text
         elif node.nodeType == Node.ELEMENT_NODE:
-            if node.qname[1] == "p":
-                if node is self.node:
-                    for child_node in node.childNodes:
-                        self._update_node_text(child_node, sfm_paragraph)
-                else:
-                    raise ValueError(
-                        f"Unexpected paragraph node in paragraph {self.style}"
-                    )
-            elif node.qname[1] == "span":
-                idx = None
-                for i, s in enumerate(self.spans):
-                    if node == s.node:
-                        idx = i
-                        break
-                # Check if Span's text needs updating.
-                if idx is None:
-                    return
-                if sfm_paragraph.spans[idx].text != extractText(node):
-                    for child_node in node.childNodes:
-                        self._update_node_text(child_node, sfm_paragraph)
+            if extractText(node) != sfm_text:
+                for child_node in node.childNodes:
+                    self._update_node_text(child_node, sfm_paragraph)

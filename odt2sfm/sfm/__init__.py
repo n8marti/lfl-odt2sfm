@@ -7,9 +7,10 @@ from .elements import SfmParagraph
 class SfmChapter:
     """A complete SFM Chapter, with one or more paragraphs and zero or more verses."""
 
-    def __init__(self, raw_sfm=None):
+    def __init__(self, raw_sfm=None, parent=None):
         self._number = None
         self._odt_styles = None
+        self.parent = parent
         self._sfm_raw = None
         if raw_sfm is not None:
             self.sfm_raw = raw_sfm
@@ -40,8 +41,10 @@ class SfmChapter:
             elif line.startswith("\\c"):
                 continue
             elif line.startswith("\\v"):
-                continue
-            paragraphs.append(SfmParagraph(line))
+                # Add to previous line's paragraph.
+                p = paragraphs.pop()
+                line = f"{p.sfm_raw}\n{line}"
+            paragraphs.append(SfmParagraph(line, parent=self))
         return paragraphs
 
     @property
@@ -102,6 +105,7 @@ class SfmBook:
         self.odt_dir_path = None
         if odt_dir_path is not None:
             self.odt_dir_path = Path(odt_dir_path)
+        self.parent = None
         self._sfm_raw = None
 
     def __str__(self):
@@ -142,6 +146,6 @@ class SfmBook:
                 else:
                     sfm_raw = f"\\c {c.rstrip(' ')}"
                 # TODO: Do we need to preserve chapter numbers for some reason?
-                chapters.append(SfmChapter(sfm_raw))
+                chapters.append(SfmChapter(sfm_raw, parent=self))
             self._chapters = chapters.copy()
         return self._chapters

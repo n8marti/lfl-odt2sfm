@@ -1,19 +1,90 @@
 import re
+import unicodedata
 
 
 class SfmElement:
     """Text that begins with an SFM."""
 
-    RE_SFM_INIT = re.compile(r"^\\[a-z]+[0-9]*( [0-9]+)* ")
+    NODE_TYPE = "element"
+    RE_SFM_INIT = re.compile(r"^\\[a-z]+[0-9]*[ \n]")
+    RE_SFM = re.compile(r"(\\[a-z]+[0-9]*[ *])")
     SFM_PLACEHOLDERS = {
         "~": "\u00a0",
     }
 
-    def __init__(self, raw_text, odt_style=None):
+    def __init__(self, raw_text, odt_style=None, parent=None):
         self._marker = None
+        self._marker_separator = None
         self._odt_style = odt_style
+        self.parent = parent
         self._sfm_raw = raw_text
         self._text = None
+        # FIXME: Normalization from should come from Paratext project settings.
+        self.normalization_form = "NFD"
+
+    @property
+    def children(self):
+        """Mimic ODT doc behavior by dividing paragraph into SfmText and SfmSpan
+        Elements."""
+        children = []
+        # Divide SFM on SFM markers.
+        parts = re.split(
+            self.RE_SFM,
+            self.sfm_raw.removeprefix(f"{self.marker}{self._marker_separator}"),
+        )
+        # print(f"{self.sfm_raw=}")
+        # print(f"{parts=}")
+        span_marker = None
+        verse_marker = None
+        prev_part = None
+        for part in parts:
+            part = part.rstrip("\n")  # remove newlines from all splits
+            # print(f"{part=}")
+            child = None
+            if len(part) == 0:  # ignore parts with no content
+                child = None
+            elif part.startswith("\\"):  # paragraph/span/chapter marker
+                part = part.rstrip(" ")  # remove spaces from SFM markers
+                if part == "\\v" and not verse_marker:
+                    verse_marker = True
+                elif not span_marker:  # capture opening span SFM marker
+                    span_marker = part
+                    # print(f"{span_marker=}")
+                elif part == f"{span_marker}*":  # define span end
+                    span_text = prev_part
+                    child = SfmSpan(
+                        f"{span_marker} {span_text}{span_marker}*", parent=self
+                    )
+                    span_marker = None
+            elif verse_marker:  # handle verse number
+                v_num, part = part.split(" ", maxsplit=1)
+                children.append(SfmSpan(f"\\v {v_num} ", parent=self))
+                child = SfmText(part, parent=self)
+                verse_marker = None
+            elif span_marker:
+                child = None
+            elif part != "":  # ignore empty part
+                child = SfmText(part, parent=self)
+            prev_part = part
+            if child:
+                children.append(child)
+
+        # print(
+        #     f"{len(children)} pre-children: {[c.__class__.__name__ for c in children]}"
+        # )
+        # Handle Text elements with double-spaces; split elements containing
+        # "  " into multiple Text elements.
+        ct = len(children)
+        for i, child in enumerate(children.copy()[::-1]):
+            idx = ct - 1 - i
+            if isinstance(child, SfmText):
+                texts = re.split(r" {2}", child.text)
+                if len(texts) > 1:
+                    children.pop(idx)
+                    for text in texts[::-1]:
+                        children.insert(idx, SfmText(text))
+        # print(f"{len(children)} children: {[c.__class__.__name__ for c in children]}")
+        return children
 
     @property
     def marker(self):
@@ -22,6 +93,7 @@ class SfmElement:
             if match is None:
                 raise ValueError(f"No intial SFM marker: {self.sfm_raw}")
             self._marker = match[0].rstrip()
+            self._marker_separator = match[0][-1]
         return self._marker
 
     @property
@@ -43,23 +115,53 @@ class SfmElement:
     #     self._sfm_raw = value
 
     @property
+    def spans(self):
+        return [c for c in self.children if isinstance(c, SfmSpan)]
+
+    @property
     def text(self):
         if self._text is None:
+            text = self.sfm_raw
             # Remove leading SFM marker.
-            text = self.sfm_raw.removeprefix(f"{self.marker} ")
-            sanitized_text = self._sanitize(text)
-            self._text = sanitized_text
+            if self.marker:
+                text = text.removeprefix(f"{self.marker}{self._marker_separator}")
+            # Replace Paratext placeholder characters.
+            text = self._sanitize(text)
+            self._text = text
         return self._text
 
-    @classmethod
-    def _sanitize(cls, text):
+    @property
+    def texts(self):
+        return [c for c in self.children if isinstance(c, SfmText)]
+
+    def _normalize(self, text):
+        return unicodedata.normalize(self.normalization_form, text)
+
+    def _sanitize(self, text):
         sanitized_text = ""
+        # Replace placeholder characters.
         for c in text:
-            sanitized_text += cls.SFM_PLACEHOLDERS.get(c, c)
+            sanitized_text += self.SFM_PLACEHOLDERS.get(c, c)
         return sanitized_text
 
     def __str__(self):
         return self.sfm_raw
+
+
+class SfmText(SfmElement):
+    NODE_TYPE = "text"
+
+    @property
+    def children(self):
+        return list()
+
+    @property
+    def marker(self):
+        return None
+
+    @property
+    def data(self):
+        return self.text
 
 
 class SfmSpan(SfmElement):
@@ -67,6 +169,7 @@ class SfmSpan(SfmElement):
     It must close with another SFM marker that matches the first one, unless
     it's a verse number reference."""
 
+    NODE_TYPE = "span"
     RE_SFM_END = re.compile(r"\\[a-z]+\*$")
 
     def __init__(self, *args, **kwargs):
@@ -78,7 +181,7 @@ class SfmSpan(SfmElement):
     @property
     def end_marker(self):
         if self._end_marker is None:
-            if self.sfm_raw.startswith("\\v"):  # special handling for verses
+            if self.marker == "\\v":  # verses are spans with no end markers
                 return self._end_marker
             match = self.RE_SFM_END.search(self.sfm_raw)
             if match is None:
@@ -95,7 +198,10 @@ class SfmSpan(SfmElement):
             if self.end_marker and self.end_marker.rstrip("*") == self.marker:
                 # Remove "closing" marker.
                 text = text.removesuffix(self.end_marker)
-            self._text = self._sanitize(text)
+            else:  # verse span
+                # Remove end space.
+                text = text.rstrip(" ")
+            self._text = text
         return self._text
 
 
@@ -103,58 +209,18 @@ class SfmParagraph(SfmElement):
     """Paragraphs can be composed of multiple text lines if containing one or
     more verses. They can contain zero or more spans."""
 
-    # RE_SFM_OPEN = re.compile(r"\\[a-z]+ ")
-
-    @property
-    def spans(self):
-        # FIXME: Tricky situation. We're assuming all opening markers are
-        # followed by corresponding closing markers; i.e. there are no nested
-        # spans.
-        spans = []
-        parts = self.sfm_raw.split("\\")
-        last_part_init = None
-        last_part_text = None
-        for part in parts:
-            if len(part) == 0:  # ignore empty split
-                continue
-            # FIXME: Again, we're making a big assumption that any "* " is
-            # always the end of a span-closing marker.
-            part_init, s, part_text = re.split(r"( |\*)", part, maxsplit=1)
-            if part_init == "v":  # verses are special kinds of spans
-                v_num = part_text.split(" ", maxsplit=1)[0]
-                sfm_raw = f"\\v {v_num}"
-                part_text = v_num
-                spans.append(SfmSpan(sfm_raw))
-            elif s == "*" and part_init == last_part_init:
-                sfm_raw = f"\\{last_part_init} {last_part_text}\\{part_init}{s}"
-                spans.append(SfmSpan(sfm_raw))
-            last_part_init = part_init
-            last_part_text = part_text
-        return spans
+    NODE_TYPE = "paragraph"
 
     @property
     def text(self):
         if self._text is None:
-            # Initialize and remove leading SFM marker.
-            text = super().text
-            # TODO: Remove any verse or span SFM markers?
-            # text = self._text
-            self._text = self._sanitize(text)
+            text = ""
+            for i, c in enumerate(self.children):
+                if hasattr(c, "end_marker") and c.end_marker is not None:
+                    text += f"{c.text}"
+                elif i == len(self.children) - 1:  # no space after last child
+                    text += f"{c.text}"
+                else:
+                    text += f"{c.text} "
+            self._text = text
         return self._text
-
-    @property
-    def texts(self):
-        texts = []
-        if self.spans:  # texts are only relevant if there are spans
-            if self.marker[1] == "v":  # don't remove verse marker if present
-                text_init = self.sfm_raw
-            else:
-                text_init = self.sfm_raw.removeprefix(self.marker)
-            remainder = text_init
-            for s in self.spans:
-                t, remainder = remainder.split(s.sfm_raw, maxsplit=1)
-                if t and t.replace(" ", "") != "":
-                    texts.append(self._sanitize(t))
-            if remainder != text_init:
-                texts.append(self._sanitize(remainder))
-        return texts
