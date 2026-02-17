@@ -5,7 +5,6 @@ from odf.element import Node
 from odf.namespaces import TEXTNS
 from odf.opendocument import load
 from odf.teletype import extractText
-from odf.text import Span
 
 from .elements import OdtParagraph
 
@@ -14,7 +13,7 @@ class OdtChapter:
     """One "lesson" ODT file in "Lessons from Luke", which corresponds to a
     "chapter" in Paratext."""
 
-    RE_2_DIGITS = re.compile(r"[0-9]{2}")
+    RE_2_DIGITS = re.compile(r"(?<=L)[0-9]{2}")
 
     def __init__(self, file_path=None):
         if file_path is None:
@@ -284,22 +283,15 @@ class OdtBook:
 
     @property
     def chapters(self):
-        chapters = list()
+        chapters = dict()
         chapter_files = sorted(
             [f for f in self.dir_path.iterdir() if f.suffix == ".odt"]
         )
-        last_file = chapter_files.pop()
-        toc_chapter = None
-        if "TOC" in last_file.name:
-            # File is Table of Contents.
-            toc_chapter = OdtToc(last_file)
-            # Put lesson at the beginning.
-            chapters.append(toc_chapter)
         for lf in chapter_files:
-            chapters.append(OdtChapter(lf))
-        if toc_chapter is None:
-            # Re-add last lesson file.
-            chapters.append(OdtChapter(last_file))
+            chapter = OdtChapter(lf)
+            if chapter.number == 0:
+                chapter = OdtToc(lf)
+            chapters[chapter.number] = chapter
         return chapters
 
     @property
