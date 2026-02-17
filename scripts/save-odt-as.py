@@ -1,6 +1,6 @@
 import sys
 
-from odf import opendocument
+from odfdo import document
 
-d = opendocument.load(sys.argv[1])
+d = document.Document(sys.argv[1])
 d.save(sys.argv[2])
