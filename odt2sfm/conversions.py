@@ -70,7 +70,8 @@ class SfmToOdt(Conversion):
                 continue
             odt_chapter = odt_orig.chapters.get(sfm_chapter.number)
             # Compare paragraph counts in original data and updated data.
-            # self.compare_paragraphs(sfm_chapter, odt_chapter)
+            # odt_chapter.all_styles_and_paragraphs()
+            self.compare_paragraphs(sfm_chapter, odt_chapter)
             self._verify_paragraph_count(sfm_chapter, odt_chapter)
             # Ensure that SFM marker is correct for ODT paragraph (or span) style.
             self._verify_sfm_markers(sfm_chapter, odt_chapter)
@@ -78,11 +79,9 @@ class SfmToOdt(Conversion):
             new_dest_path.mkdir(exist_ok=True)
             # Make copy of original ODT into updated folder.
             odt_new_file = new_dest_path / odt_chapter.file_path.name
-            # for i, odt_p in enumerate(odt_chapter.paragraphs):
-            #     odt_p.update_text(sfm_chapter.paragraphs[i])
-            # odt_chapter.odt.toXml("/home/nate/test.xml")  # correct
-            # print(odt_chapter.odt.contentxml())  # correct
-            odt_chapter.odt.save(str(odt_new_file))  # incorrect
+            for i, odt_p in enumerate(odt_chapter.paragraphs):
+                odt_p.update_text(sfm_chapter.paragraphs[i])
+            odt_chapter.odt.save(str(odt_new_file))
             print(f'Saved to: "{odt_new_file}"')
 
     @staticmethod
@@ -112,8 +111,8 @@ class SfmToOdt(Conversion):
     def _verify_sfm_markers(sfm_chapter, odt_chapter):
         for i, p in enumerate(odt_chapter.paragraphs):
             sfm = sfm_chapter.paragraphs[i].marker
-            if odt_chapter.styles.get(p.style) != sfm:
-                print(p.text)
+            marker = odt_chapter.styles.get(p.style)
+            if marker != sfm:
                 raise ValueError(
-                    f'SFM marker ({sfm}) does not correspond to ODT style ({p.style}) for text "{p.text}"'
+                    f'SFM marker ({sfm}) does not correspond to ODT style ({p.style}) for text "{p.text}"; expected: {marker}'
                 )
