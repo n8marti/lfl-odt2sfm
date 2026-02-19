@@ -1,6 +1,7 @@
+import logging
 import unicodedata
 
-from odfdo import Element, EText
+from odfdo import Element
 
 
 class OdtElement:
@@ -17,6 +18,15 @@ class OdtElement:
         return self.node.children
 
     @property
+    def intro(self):
+        """Returns initial characters of text element. Mostly used for logging."""
+        if len(self.text_recursive) > 23:
+            s = f"{self.text_recursive[:20]}..."
+        else:
+            s = self.text_recursive
+        return s
+
+    @property
     def parent(self):
         return self.node.parent
 
@@ -30,7 +40,23 @@ class OdtElement:
         return "/".join(path)
 
     @property
+    def tail(self):
+        return self.node.tail
+
+    @tail.setter
+    def tail(self, value):
+        self.node.tail = value
+
+    @property
     def text(self):
+        return self.node.text
+
+    @text.setter
+    def text(self, value):
+        self.node.text = value
+
+    @property
+    def text_recursive(self):
         return self.node.text_recursive
 
     def _normalize(self, text):
@@ -38,81 +64,120 @@ class OdtElement:
         return unicodedata.normalize(self.normalization_form, text)
 
     def __str__(self):
-        return self.text
+        return self.text_recursive
 
 
 class OdtText(OdtElement):
+    """A text-carrying object. Can be node's `text` or `tail` attribute."""
+
+    def __init__(self, text, parent, tail=False, **kwargs):
+        # Pass parent as node to OdtElement.
+        super().__init__(parent, **kwargs)
+        self.is_tail = tail
+
     @property
-    def data(self):
-        return self.node
+    def tail(self):
+        if self.is_tail:
+            return self.text
 
     @property
     def text(self):
-        return self.node
+        if self.is_tail:
+            return self.node.tail
+        else:
+            return self.node.text
+
+    @text.setter
+    def text(self, value):
+        if self.is_tail:
+            self.node.tail = value
+        else:
+            self.node.text = value
 
 
 class OdtSpan(OdtElement):
     @property
     def style(self):
-        return self.node.get_attribute("text:style-name")
+        return self.node.style
 
     @property
     def text(self):
+        # .inner_text includes child nodes, such as tabs and spacers.
         return self.node.inner_text
+
+    @text.setter
+    def text(self, value):
+        self.node.text = value
 
 
 class OdtParagraph(OdtElement):
     @property
     def children(self):
-        def _filter_children(node, accumulator=None):
-            if accumulator is None:
-                accumulator = []
-            if node.text:
-                accumulator.append(node.text)
-            if node.tail:
-                accumulator.append(node.tail)
-            for child in node.children:
-                if child.tag in ("text:paragraph", "text:span"):
-                    if child.style in self.chapter.styles:
-                        accumulator.append(child)
+        children = []
+        # We re-interpret text as a "child" for cleaner looping.
+        if self.text and self.text.replace(" ", "") != "":
+            children.append(OdtText(self.text, self.node, chapter=self.chapter))
+        for child_node in self.node.children:
+            # Check for Span type first, which has .style, then check for style attrib.
+            if child_node.tag == "text:span":
+                if child_node.style in self.chapter.styles:
+                    children.append(OdtSpan(child_node, chapter=self.chapter))
                 else:
-                    accumulator = _filter_children(child, accumulator)
-            return accumulator
+                    logging.info(
+                        f"Skipping child w/ excluded style: {child_node.tag}:[{child_node.style}]{child_node.text}"
+                    )
+            else:
+                if child_node.text and child_node.text.replace(" ", "") != "":
+                    # logging.debug(f'Adding text: "{child.text}"')
+                    children.append(
+                        OdtText(child_node.text, child_node, chapter=self.chapter)
+                    )
+                logging.info(f"Skipping child w/ invalid tag: {child_node.tag}")
+            if child_node.tail and child_node.tail.replace(" ", "") != "":
+                # logging.debug(f'Adding tail: "{child_node.tail}"')
+                children.append(
+                    OdtText(
+                        child_node.tail, child_node, tail=True, chapter=self.chapter
+                    )
+                )
+        # As with text, we re-interpret any "tail" as a final child node.
+        if self.tail and self.tail.replace(" ", "") != "":
+            children.append(OdtText(self.tail, tail=True, chapter=self.chapter))
 
-        print(f"children: checking: {self.node.tag}/{self.all_children=}")
-        children = _filter_children(self.node)
-
+        # logging.debug(f"{self.text_recursive=}; {[c.text for c in children]}")
         return children
 
     @property
     def spans(self):
-        def descendent_of_node(node, ancestor):
-            while node:
-                if node is ancestor:
-                    return True
-                # NOTE: Top node has no parent.
-                node = node.parent
+        # def descendent_of_node(node, ancestor):
+        #     while node:
+        #         if node is ancestor:
+        #             return True
+        #         # NOTE: Top node has no parent.
+        #         node = node.parent
 
         spans = []
-        for c_node in self.children:
-            print(f"Checking: {c_node.tag}")
-            # Ignore non-span nodes..
-            if c_node.tag != "text:span":
-                print(f"Skipping: {c_node.tag}")
-                continue
-            print(f"Keeping: {c_node.tag}")
-            # Ignore spans that contain the full paragraph's text.
-            if c_node.text == self.text:
-                continue
-            # Ignore spans whose style is not in the useful styles list.
-            if c_node.get_attribute("text:style-name") not in self.chapter.styles:
-                continue
-            spans.append(OdtSpan(c_node))
+        for child in self.children:
+            if isinstance(child, OdtSpan):
+                spans.append(child)
+            # logging.debug(f"Checking: {child.node.tag}")
+            # # Ignore non-span nodes..
+            # if child.node.tag != "text:span":
+            #     logging.debug(f"Skipping: {child.node.tag}")
+            #     continue
+            # logging.debug(f"Keeping: {child.node.tag}")
+            # # Ignore spans that contain the full paragraph's text.
+            # if child.text_recursive == self.text_recursive:
+            #     continue
+            # # Ignore spans whose style is not in the useful styles list.
+            # if child.style not in self.chapter.styles:
+            #     continue
+            # spans.append(child)
         return spans
 
     @property
     def style(self):
-        return self.node.get_attribute("text:style-name")
+        return self.node.style
 
     # @property
     # def texts(self):
@@ -136,32 +201,58 @@ class OdtParagraph(OdtElement):
         and update their data if needed."""
         # Only proceed if overall paragraph text is different.
         if self.text == self._normalize(sfm_paragraph.text):
-            print(f"Skipping unchanged paragraph: {sfm_paragraph.text[:20]}...")
+            logging.debug(f"Skipping unchanged paragraph: {sfm_paragraph.intro}")
             return
         # print(f"\n{self.text}\n{self._normalize(sfm_paragraph.text)}\n")
         odt_ct = len(self.children)
         sfm_ct = len(sfm_paragraph.children)
         if odt_ct != sfm_ct:
-            print(f"Warning: Unmatched children for ODT ({odt_ct}) & SFM ({sfm_ct})")
-            print([c.__class__.__name__ for c in self.children])
-            texts = []
-            # for c in self.children:
-            #     if c.nodeType == Node.TEXT_NODE:
-            #         texts.append(c.data)
-            #     else:
-            #         texts.append(str(c))
-            print(texts)
-            print([c.__class__.__name__ for c in sfm_paragraph.children])
-            print([c.text for c in sfm_paragraph.children])
-            # print(extractText(self.node))
-            print()
+            logging.warning(
+                f"Warning: Unmatched children for ODT ({odt_ct}) & SFM ({sfm_ct}): {sfm_paragraph.intro}"
+            )
+            logging.debug([f'{c.__class__.__name__}:"{c.text}"' for c in self.children])
+            logging.debug(
+                [f'{c.__class__.__name__}:"{c.text}"' for c in sfm_paragraph.children]
+            )
+            logging.debug("\n")
             return
 
-        self._update_node_text(self.node, sfm_paragraph)
+        prev_odt_item = None
+        for i, odt_item in enumerate(self.children):
+            sfm_item = sfm_paragraph.children[i]
+            if isinstance(odt_item, OdtText):
+                # Set odt_paragraph.text or odt_text.tail value.
+                if i == 0:
+                    logging.info(
+                        f'Updating OdtText "{odt_item.intro}" to "{sfm_item.intro}"'
+                    )
+                else:
+                    logging.info(
+                        f'Updating OdtText tail "{odt_item.tail}" to "{sfm_item.intro}"'
+                    )
+                odt_item.text = sfm_item.text
+            elif isinstance(odt_item, OdtSpan):
+                logging.info(
+                    f'Updating OdtSpan "{odt_item.intro}" to "{sfm_item.intro}"'
+                )
+                odt_item.text = sfm_item.text
+            prev_odt_item = odt_item
 
-    def _update_node_text(self, node, sfm_paragraph):
-        """Update node text by editing child Text nodes recursively."""
+        # self._update_item_text(self, sfm_paragraph)
 
+    def _update_item_text(self, item, sfm_paragraph):
+        """Update [OdtParagraph/OdtSpan/OdtText] item text by editing child Text nodes recursively."""
+
+        for i, child in enumerate(self.children):
+            pass
+        # Find corresponding item's index in own paragraph's children.
+        # idx = self.children.index(item)
+        # print(idx)
+        return
+
+        if isinstance(item, OdtText):
+            # Update text directly.
+            pass
         # def compare_nodes(node, children):
         #     idx = None
         #     for i, n in enumerate(self.children):
@@ -175,28 +266,28 @@ class OdtParagraph(OdtElement):
         #     f"{self.node.qname[1]}:{[c.qname[1] for c in self.children if hasattr(c, 'qname')]}"
         # )
 
-        idx = None
-        for i, n in enumerate(self.children):
-            if node is n:
-                idx = i
-                break
-        if idx is None:
-            # Node does not have updatable text.
-            # print(
-            #     f"Skipping ignored node: {node.parentNode.qname[1]}/{node.qname[1]}: {str(node)}"
-            # )
-            # print(f"{self.node=}; {self.children=}")
-            # print(f"{[n.__class__.__name__ for n in node.childNodes]}")
-            return
+        # idx = None
+        # for i, n in enumerate(self.node.children):
+        #     if node is n:
+        #         idx = i
+        #         break
+        # if idx is None:
+        #     # Node does not have updatable text.
+        #     # print(
+        #     #     f"Skipping ignored node: {node.parentNode.qname[1]}/{node.qname[1]}: {str(node)}"
+        #     # )
+        #     # print(f"{self.node=}; {self.children=}")
+        #     # print(f"{[n.__class__.__name__ for n in node.childNodes]}")
+        #     return
 
-        sfm_text = self._normalize(sfm_paragraph.children[idx])
-        if isinstance(node, EText):
-            if node != sfm_text:
-                print(
-                    f"Updating text for: {node.parent.get_attribute('text:style-name')}; from '{node}' to '{sfm_text}'"
-                )
-                node = EText(sfm_text)
-        elif isinstance(node, Element):
-            if node.text_recursive != sfm_text:
-                for child_node in node.children:
-                    self._update_node_text(child_node, sfm_paragraph)
+        # sfm_text = self._normalize(sfm_paragraph.children[idx])
+        # if isinstance(node, EText):
+        #     if node != sfm_text:
+        #         logging.info(
+        #             f"Updating text for: {node.parent.get_attribute('text:style-name')}; from '{node}' to '{sfm_text}'"
+        #         )
+        #         node = EText(sfm_text)
+        # elif isinstance(node, Element):
+        #     if node.text_recursive != sfm_text:
+        #         for child_node in node.children:
+        #             self._update_node_text(child_node, sfm_paragraph)
