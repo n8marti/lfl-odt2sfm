@@ -1,8 +1,9 @@
+import logging
 from pathlib import Path
 
 from .base import get_timestamp
-from .odt import OdtBook
-from .sfm import SfmBook
+from .odt import OdtBook, OdtChapter
+from .sfm import SfmBook, SfmChapter
 
 
 class Conversion:
@@ -57,20 +58,50 @@ class OdtToSfm(Conversion):
 
 
 class SfmToOdt(Conversion):
+    @staticmethod
+    def compare_paragraphs(chapters):
+        odt_chapter = None
+        sfm_chapter = None
+        for chapter in chapters:
+            if isinstance(chapter, SfmChapter):
+                sfm_chapter = chapter
+            elif isinstance(chapter, OdtChapter):
+                odt_chapter = chapter
+        for c in (odt_chapter, sfm_chapter):
+            if c is None:
+                raise ValueError(f"Invalid chapter type: {type(c)}")
+
+        for i, odt_p in enumerate(odt_chapter.paragraphs):
+            print(f"[{odt_p.style}] {odt_p.text}")
+            try:
+                sfm_p = sfm_chapter.paragraphs[i]
+            except IndexError:
+                sfm_p = None
+            if sfm_p:
+                style = sfm_p.marker
+                text = sfm_p.text
+            else:
+                style = text = None
+            print(f"[{style}] {text}\n")
+
     def run(self):
         """Create updated ODT file(s) based on the data found in the given SFM file."""
+        logging.info(f"Evaluating source path: {self.source_path}")
         sfm_book = SfmBook(self.source_path)
-        odt_orig = OdtBook(self.destination_path)
+        logging.info(f"Evaluating destination path: {self.destination_path}")
+        odt_book = OdtBook(self.destination_path)
         new_dest_path = self.destination_path.with_name(
             f"{self.destination_path.name}_updated_{get_timestamp()}"
         )
         for sfm_chapter in sfm_book.chapters:
+            logging.info(
+                f"Evaluating source chapter: {sfm_chapter.number}: {sfm_chapter.intro}"
+            )
             # FIXME: For testing, skip all chapters but Chapter 1.
             if sfm_chapter.number != 1:
                 continue
-            odt_chapter = odt_orig.chapters.get(sfm_chapter.number)
+            odt_chapter = odt_book.chapters.get(sfm_chapter.number)
             # Compare paragraph counts in original data and updated data.
-            # self.compare_paragraphs(sfm_chapter, odt_chapter)
             self._verify_paragraph_count(sfm_chapter, odt_chapter)
             # Ensure that SFM marker is correct for ODT paragraph (or span) style.
             self._verify_sfm_markers(sfm_chapter, odt_chapter)
@@ -78,27 +109,12 @@ class SfmToOdt(Conversion):
             new_dest_path.mkdir(exist_ok=True)
             # Make copy of original ODT into updated folder.
             odt_new_file = new_dest_path / odt_chapter.file_path.name
-            # for i, odt_p in enumerate(odt_chapter.paragraphs):
-            #     odt_p.update_text(sfm_chapter.paragraphs[i])
-            # odt_chapter.odt.toXml("/home/nate/test.xml")  # correct
-            # print(odt_chapter.odt.contentxml())  # correct
-            odt_chapter.odt.save(str(odt_new_file))  # incorrect
-            print(f'Saved to: "{odt_new_file}"')
 
-    @staticmethod
-    def compare_paragraphs(sfm_chapter, odt_chapter):
-        for i, odt_p in enumerate(odt_chapter.paragraphs):
-            try:
-                sfm_p = sfm_chapter.paragraphs[i]
-            except IndexError:
-                sfm_p = None
-            print(f"[{odt_p.style}] {odt_p.text}")
-            if sfm_p:
-                style = sfm_p.marker
-                text = sfm_p.text
-            else:
-                style = text = None
-            print(f"[{style}] {text}\n")
+            logging.info("Comparing with destination chapter.")
+            for i, odt_p in enumerate(odt_chapter.paragraphs):
+                odt_p.update_text(sfm_chapter.paragraphs[i])
+            odt_chapter.save(odt_new_file)
+            print(f'Saved to: "{odt_new_file}"')
 
     @staticmethod
     def _verify_paragraph_count(sfm_chapter, odt_chapter):
@@ -112,8 +128,8 @@ class SfmToOdt(Conversion):
     def _verify_sfm_markers(sfm_chapter, odt_chapter):
         for i, p in enumerate(odt_chapter.paragraphs):
             sfm = sfm_chapter.paragraphs[i].marker
-            if odt_chapter.styles.get(p.style) != sfm:
-                print(p.text)
+            marker = odt_chapter.styles.get(p.style)
+            if marker != sfm:
                 raise ValueError(
-                    f'SFM marker ({sfm}) does not correspond to ODT style ({p.style}) for text "{p.text}"'
+                    f'SFM marker ({sfm}) does not correspond to ODT style ({p.style}) for text "{p.text}"; expected: {marker}'
                 )

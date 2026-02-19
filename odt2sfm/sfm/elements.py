@@ -32,14 +32,11 @@ class SfmElement:
             self.RE_SFM,
             self.sfm_raw.removeprefix(f"{self.marker}{self._marker_separator}"),
         )
-        # print(f"{self.sfm_raw=}")
-        # print(f"{parts=}")
         span_marker = None
         verse_marker = None
         prev_part = None
         for part in parts:
             part = part.rstrip("\n")  # remove newlines from all splits
-            # print(f"{part=}")
             child = None
             if len(part) == 0:  # ignore parts with no content
                 child = None
@@ -69,11 +66,6 @@ class SfmElement:
             if child:
                 children.append(child)
 
-        # print(
-        #     f"{len(children)} pre-children: {[c.__class__.__name__ for c in children]}"
-        # )
-        # Handle Text elements with double-spaces; split elements containing
-        # "  " into multiple Text elements.
         ct = len(children)
         for i, child in enumerate(children.copy()[::-1]):
             idx = ct - 1 - i
@@ -83,8 +75,17 @@ class SfmElement:
                     children.pop(idx)
                     for text in texts[::-1]:
                         children.insert(idx, SfmText(text))
-        # print(f"{len(children)} children: {[c.__class__.__name__ for c in children]}")
+
         return children
+
+    @property
+    def intro(self):
+        """Returns initial characters of text element. Mostly used for logging."""
+        if len(self.text) > 23:
+            s = f"{self.text[:20]}..."
+        else:
+            s = self.text
+        return s
 
     @property
     def marker(self):

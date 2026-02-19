@@ -1,0 +1,6 @@
+Title   \mt
+Heading_20_1    \s1
+Heading_20_2    \s2
+Text_20_body    \p
+T1  \bd
+Quotations  \q

@@ -1,10 +1,8 @@
+import logging
 import re
 from pathlib import Path
 
-from odf.element import Node
-from odf.namespaces import TEXTNS
-from odf.opendocument import load
-from odf.teletype import extractText
+from odfdo import Document
 
 from .elements import OdtParagraph
 
@@ -24,6 +22,7 @@ class OdtChapter:
             raise ValueError(f"File does not exist: {self.file_path}")
 
         self._odt = None
+        self._style_reference_file = None
         self._sfm_ref = None
         self._all_styles = None
         self._styles = None
@@ -34,11 +33,23 @@ class OdtChapter:
         paragraph. Note: Some definied paragraphs have no text, some have no
         defined style, and some are not intended to be user-editable."""
 
+        # NOTE: self.odt.body.headers and .paragraphs exist, but they will not
+        # return those elements in the correct, indexable order.
         return [p for p in self._get_elements_by_nstypes(self.odt, ("h", "p"))]
 
     @property
     def all_spans(self):
-        return [s for s in self._get_elements_by_nstypes(self.odt, ("span",))]
+        return self.odt.body.spans
+
+    @property
+    def all_styles(self):
+        if self._all_styles is None:
+            styles = []
+            for p in self.paragraphs:
+                if p.style not in styles:
+                    styles.append(p.style)
+            self._all_styles = styles
+        return self._all_styles
 
     @property
     def name(self):
@@ -55,38 +66,41 @@ class OdtChapter:
     @property
     def odt(self):
         if self._odt is None:
-            self._odt = load(self.file_path)
+            lock_file = self.file_path.parent / f".~lock.{self.file_path.name}#"
+            if lock_file.is_file():
+                raise OSError(f"File already open: {self.file_path}")
+            self._odt = Document(self.file_path)
         return self._odt
-
-    def _get_elements_by_nstypes(self, node, nstypes, accumulator=None):
-        """Return valid "paragraph" elements in document order to preserve
-        indexing."""
-        qnames = [(TEXTNS, t) for t in nstypes]
-        if accumulator is None:
-            accumulator = list()
-
-        # If "node" is a document, choose its top Node.
-        if not hasattr(node, "qname"):
-            node = node.topnode
-
-        if node.qname in qnames:
-            accumulator.append(node)
-
-        for e in node.childNodes:
-            if e.nodeType == Node.ELEMENT_NODE:
-                accumulator = self._get_elements_by_nstypes(e, nstypes, accumulator)
-
-        return accumulator
 
     @property
     def paragraphs(self):
         """Return list of user-editable paragraphs."""
         paragraphs = []
-        for p_node in self.all_paragraphs:
-            if len(extractText(p_node)) == 0:
+        for node in self.all_paragraphs:
+            if len(node.text_recursive) == 0:
+                logging.info(
+                    f"Skipping non-text node: {node.tag}:{node.text_recursive}"
+                )
                 continue
-            if p_node.getAttribute("stylename") in self.styles:
-                paragraphs.append(OdtParagraph(p_node, chapter=self))
+            # Ignore nodes with attachment-only "text".
+            if (
+                re.sub(
+                    r"\(Pictures/[0-9A-F]+\.[a-zA-Z1-9]{2,}\)",
+                    "",
+                    node.text_recursive,
+                )
+                == ""
+            ):
+                logging.info(
+                    f"Skipping node w/ no valid children: {node.tag}/{node.children}={node.text_recursive}"
+                )
+                continue
+            if node.style not in self.styles:
+                logging.info(
+                    f"Skipping node w/ excluded style: {node.tag}:{node.style}"
+                )
+                continue
+            paragraphs.append(OdtParagraph(node, chapter=self))
         return paragraphs
 
     @property
@@ -99,14 +113,13 @@ class OdtChapter:
             nodes.extend([n for n in self.all_spans])
             for node in nodes:
                 # Ignore spans with no style info.
-                if node.getAttribute("stylename") is None:
+                if node.style is None:
                     continue
                 # Ignore spans with no text.
-                if len(extractText(node)) == 0:
+                if len(node.text_recursive) == 0:
                     continue
-                style_name = node.getAttribute("stylename")
-                if style_name in self.sfm_ref.keys():
-                    styles[style_name] = self.sfm_ref.get(style_name)
+                if node.style in self.sfm_ref.keys():
+                    styles[node.style] = self.sfm_ref.get(node.style)
             self._styles = styles
         return self._styles
 
@@ -156,8 +169,9 @@ class OdtChapter:
     def sfm_ref(self):
         if not self._sfm_ref:
             self._sfm_ref = dict()
-            ref_file = Path(__file__).parents[2] / "ref.txt"
-            for line in ref_file.read_text().splitlines():
+            for line in self.style_reference_file.read_text().splitlines():
+                if line.lstrip().startswith("#"):  # skip commented lines
+                    continue
                 try:
                     k, v = line.split("\\")
                     self._sfm_ref[k.strip()] = f"\\{v.strip()}"
@@ -173,28 +187,50 @@ class OdtChapter:
             self._sfm_ref = value
 
     @property
-    def all_styles(self):
-        if self._all_styles is None:
-            styles = []
-            for p in self.paragraphs:
-                if p.style not in styles:
-                    styles.append(p.style)
-            self._all_styles = styles
-        return self._all_styles
+    def style_reference_file(self):
+        if self._style_reference_file is None:
+            filename = "styles-reference.txt"
+            # Check ODT file's parent folder.
+            ref_file = self.file_path.parent / filename
+            if not ref_file.is_file():
+                # Fall back to repo file.
+                ref_file = Path(__file__).parents[2] / filename
+            self._style_reference_file = ref_file
+        return self._style_reference_file
 
     def all_styles_and_paragraphs(self):
-        raise NotImplementedError
+        # raise NotImplementedError
         data = []
-        for p in self.all_paragraphs:
-            data.append(f"[{p.style}] {p.text}")
-            for s in p.spans:
+        for p_node in self.all_paragraphs:
+            data.append(f"[{p_node.style}] {p_node.text}")
+            for s in p_node.spans:
                 data.append(f"> [{s.style}] {s.text}")
-        return data
+        print("\n".join(data))
 
-    # def save(self):
-    #     path = Path(outfile_path)
-    #     if not path.is_file():
-    #         raise FileNotFoundError
+    def _get_elements_by_nstypes(self, node, nstypes, accumulator=None):
+        """Return valid "header" and "paragraph" elements in document order to
+        preserve indexing."""
+        qnames = [f"text:{t}" for t in nstypes]
+        if accumulator is None:
+            accumulator = list()
+
+        # If "node" is a document, choose its top Node.
+        if not hasattr(node, "tag"):
+            node = node.body
+
+        if node.tag in qnames:
+            accumulator.append(node)
+
+        for c in node.children:
+            accumulator = self._get_elements_by_nstypes(c, nstypes, accumulator)
+
+        return accumulator
+
+    def save(self, file_path):
+        lock_file = file_path.parent / f".~lock.{self.file_path.name}#"
+        if lock_file.is_file():
+            raise OSError(f"File already open: {self.file_path}")
+        self.odt.save(str(file_path))
 
     # def export_sfm(self):
     #     outfile = Path(self.name).with_suffix(".sfm")

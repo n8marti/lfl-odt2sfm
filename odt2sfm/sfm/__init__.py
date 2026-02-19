@@ -16,6 +16,15 @@ class SfmChapter:
             self.sfm_raw = raw_sfm
 
     @property
+    def intro(self):
+        """Returns initial characters of text element; used in logging."""
+        if len(self.sfm_raw) > 23:
+            s = f"{self.sfm_raw[:20]}..."
+        else:
+            s = self.sfm_raw
+        return s
+
+    @property
     def number(self):
         if self._number is None:
             m = re.match(r"^\\c ([0-9]+)?", self.sfm_raw)
