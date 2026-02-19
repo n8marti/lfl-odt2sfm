@@ -25,7 +25,7 @@ Bible_20_Story_20_-_20_Graphic_20_Number    \qc
 P8  \p
 P21 \s3
 P35 \li1
-#Numbered_20_List    \li1
+Numbered_20_List    \li1
 P16 \pm
 P29 \li1
 P36 \li1
