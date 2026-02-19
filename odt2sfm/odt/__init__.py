@@ -1,3 +1,4 @@
+import logging
 import re
 from pathlib import Path
 
@@ -21,6 +22,7 @@ class OdtChapter:
             raise ValueError(f"File does not exist: {self.file_path}")
 
         self._odt = None
+        self._style_reference_file = None
         self._sfm_ref = None
         self._all_styles = None
         self._styles = None
@@ -64,27 +66,11 @@ class OdtChapter:
     @property
     def odt(self):
         if self._odt is None:
+            lock_file = self.file_path.parent / f".~lock.{self.file_path.name}#"
+            if lock_file.is_file():
+                raise OSError(f"File already open: {self.file_path}")
             self._odt = Document(self.file_path)
         return self._odt
-
-    def _get_elements_by_nstypes(self, node, nstypes, accumulator=None):
-        """Return valid "header" and "paragraph" elements in document order to
-        preserve indexing."""
-        qnames = [f"text:{t}" for t in nstypes]
-        if accumulator is None:
-            accumulator = list()
-
-        # If "node" is a document, choose its top Node.
-        if not hasattr(node, "tag"):
-            node = node.body
-
-        if node.tag in qnames:
-            accumulator.append(node)
-
-        for c in node.children:
-            accumulator = self._get_elements_by_nstypes(c, nstypes, accumulator)
-
-        return accumulator
 
     @property
     def paragraphs(self):
@@ -92,7 +78,9 @@ class OdtChapter:
         paragraphs = []
         for node in self.all_paragraphs:
             if len(node.text_recursive) == 0:
-                print(f"Skipping non-text node: {node.tag}:{node.text_recursive}")
+                logging.info(
+                    f"Skipping non-text node: {node.tag}:{node.text_recursive}"
+                )
                 continue
             # Ignore nodes with attachment-only "text".
             if (
@@ -103,12 +91,14 @@ class OdtChapter:
                 )
                 == ""
             ):
-                print(
-                    f"Skipping node with no valid children: {node.tag}/{node.children}={node.text_recursive}"
+                logging.info(
+                    f"Skipping node w/ no valid children: {node.tag}/{node.children}={node.text_recursive}"
                 )
                 continue
             if node.style not in self.styles:
-                print(f"Skipping node with excluded style: {node.tag}:{node.style}")
+                logging.info(
+                    f"Skipping node w/ excluded style: {node.tag}:{node.style}"
+                )
                 continue
             paragraphs.append(OdtParagraph(node, chapter=self))
         return paragraphs
@@ -179,8 +169,7 @@ class OdtChapter:
     def sfm_ref(self):
         if not self._sfm_ref:
             self._sfm_ref = dict()
-            ref_file = Path(__file__).parents[2] / "ref.txt"
-            for line in ref_file.read_text().splitlines():
+            for line in self.style_reference_file.read_text().splitlines():
                 if line.lstrip().startswith("#"):  # skip commented lines
                     continue
                 try:
@@ -197,6 +186,18 @@ class OdtChapter:
         else:
             self._sfm_ref = value
 
+    @property
+    def style_reference_file(self):
+        if self._style_reference_file is None:
+            filename = "styles-reference.txt"
+            # Check ODT file's parent folder.
+            ref_file = self.file_path.parent / filename
+            if not ref_file.is_file():
+                # Fall back to repo file.
+                ref_file = Path(__file__).parents[2] / filename
+            self._style_reference_file = ref_file
+        return self._style_reference_file
+
     def all_styles_and_paragraphs(self):
         # raise NotImplementedError
         data = []
@@ -206,10 +207,30 @@ class OdtChapter:
                 data.append(f"> [{s.style}] {s.text}")
         print("\n".join(data))
 
-    # def save(self):
-    #     path = Path(outfile_path)
-    #     if not path.is_file():
-    #         raise FileNotFoundError
+    def _get_elements_by_nstypes(self, node, nstypes, accumulator=None):
+        """Return valid "header" and "paragraph" elements in document order to
+        preserve indexing."""
+        qnames = [f"text:{t}" for t in nstypes]
+        if accumulator is None:
+            accumulator = list()
+
+        # If "node" is a document, choose its top Node.
+        if not hasattr(node, "tag"):
+            node = node.body
+
+        if node.tag in qnames:
+            accumulator.append(node)
+
+        for c in node.children:
+            accumulator = self._get_elements_by_nstypes(c, nstypes, accumulator)
+
+        return accumulator
+
+    def save(self, file_path):
+        lock_file = file_path.parent / f".~lock.{self.file_path.name}#"
+        if lock_file.is_file():
+            raise OSError(f"File already open: {self.file_path}")
+        self.odt.save(str(file_path))
 
     # def export_sfm(self):
     #     outfile = Path(self.name).with_suffix(".sfm")
