@@ -4,6 +4,7 @@ from pathlib import Path
 
 from odfdo import Document
 
+from ..base import get_timestamp
 from .elements import OdtParagraph
 
 
@@ -78,7 +79,7 @@ class OdtChapter:
         paragraphs = []
         for node in self.all_paragraphs:
             if len(node.text_recursive) == 0:
-                logging.info(
+                logging.debug(
                     f"Skipping non-text node: {node.tag}:{node.text_recursive}"
                 )
                 continue
@@ -91,12 +92,12 @@ class OdtChapter:
                 )
                 == ""
             ):
-                logging.info(
+                logging.debug(
                     f"Skipping node w/ no valid children: {node.tag}/{node.children}={node.text_recursive}"
                 )
                 continue
             if node.style not in self.styles:
-                logging.info(
+                logging.debug(
                     f"Skipping node w/ excluded style: {node.tag}:{node.style}"
                 )
                 continue
@@ -122,48 +123,6 @@ class OdtChapter:
                     styles[node.style] = self.sfm_ref.get(node.style)
             self._styles = styles
         return self._styles
-
-    @property
-    def sfm(self):
-        # Initialize data.
-        out_text = list()
-        # Add "chapter" info.
-        if self.number > 0:
-            out_text.append(f"\\c {self.number}")
-        # Add lines from ODT document.
-        for p in self.paragraphs:
-            # Ignore paragraphs with no style info.
-            if p.style is None:
-                continue
-            # Ignore paragraphs with no text.
-            if len(p.text) == 0:
-                continue
-
-            line = ""
-            # See if corresponding SFM exists in reference table.
-            sfm = self.sfm_ref.get(p.style)
-            if sfm:
-                line = f"{sfm} {p.text}"
-            if len(p.spans) > 0:
-                # If span text is identical to paragraph text, use the span's
-                # style instead of paragraph's style (e.g. ODT lists).
-                s1 = p.spans[0]
-                if p.text == s1.text:
-                    sfm = self.sfm_ref.get(s1.style)
-                    line = f"{sfm} {s1.text}"
-                # If span(s) are a subset of paragraph text, try to apply inline
-                # formatting.
-                else:
-                    for s in p.spans:
-                        sfm_inline = self.sfm_ref.get(s.style)
-                        if sfm_inline and len(s.text) > 0:
-                            s_inline = f"{sfm_inline} {s.text}{sfm_inline}*"
-                            line = line.replace(s.text, s_inline)
-
-            # Add SFM line.
-            if len(line) > 0:
-                out_text.append(line)
-        return "\n".join(out_text)
 
     @property
     def sfm_ref(self):
@@ -202,9 +161,9 @@ class OdtChapter:
         # raise NotImplementedError
         data = []
         for p_node in self.all_paragraphs:
-            data.append(f"[{p_node.style}] {p_node.text}")
+            data.append(f'[{p_node.style}] "{p_node.text_recursive}"')
             for s in p_node.spans:
-                data.append(f"> [{s.style}] {s.text}")
+                data.append(f'> [{s.style}] "{s.inner_text}"|"{s.tail}"')
         print("\n".join(data))
 
     def _get_elements_by_nstypes(self, node, nstypes, accumulator=None):
@@ -232,13 +191,48 @@ class OdtChapter:
             raise OSError(f"File already open: {self.file_path}")
         self.odt.save(str(file_path))
 
-    # def export_sfm(self):
-    #     outfile = Path(self.name).with_suffix(".sfm")
-    #     outfile.write_text(self.sfm)
+    def to_sfm(self):
+        # Initialize data.
+        out_text = list()
+        # Add "chapter" info.
+        if self.number > 0:
+            out_text.append(f"\\c {self.number}")
+        # Add lines from ODT document.
+        for p in self.paragraphs:
+            # FIXME: Cut off for testing.
+            continue
+            # Ignore paragraphs with no style info.
+            if p.style is None:
+                continue
+            # Ignore paragraphs with no text.
+            if len(p.text) == 0:
+                continue
 
-    # def export_styles_and_text(self):
-    #     outfile = Path(self.name).with_suffix(".txt")
-    #     outfile.write_text("\n".join(self.all_styles_and_paragraphs()))
+            line = ""
+            # See if corresponding SFM exists in reference table.
+            sfm = self.sfm_ref.get(p.style)
+            if sfm:
+                line = f"{sfm} {p.text}"
+            if len(p.spans) > 0:
+                # If span text is identical to paragraph text, use the span's
+                # style instead of paragraph's style (e.g. ODT lists).
+                s1 = p.spans[0]
+                if p.text == s1.text:
+                    sfm = self.sfm_ref.get(s1.style)
+                    line = f"{sfm} {s1.text}"
+                # If span(s) are a subset of paragraph text, try to apply inline
+                # formatting.
+                else:
+                    for s in p.spans:
+                        sfm_inline = self.sfm_ref.get(s.style)
+                        if sfm_inline and len(s.text) > 0:
+                            s_inline = f"{sfm_inline} {s.text}{sfm_inline}*"
+                            line = line.replace(s.text, s_inline)
+
+            # Add SFM line.
+            if len(line) > 0:
+                out_text.append(line)
+        return "\n".join(out_text)
 
     def __str__(self):
         return self.name
@@ -334,19 +328,29 @@ class OdtBook:
     def name(self):
         return self.dir_path.name
 
-    # @property
-    # def sfm(self):
-    #     # Initialize data.
-    #     out_text = list()
-    #     # Add "book" info.
-    #     out_text.append(
-    #         f'\\id XXA "{self.name}"; generated by "{__file__}" at {self.timestamp()}'
-    #     )
-    #     out_text.append("\\usfm 3.0")
-    #     # Add lines from lessons.
-    #     for chapter in self.chapters:
-    #         out_text.append(chapter.sfm)
-    #     return "\n".join(out_text)
+    @staticmethod
+    def timestamp():
+        return get_timestamp()
+
+    def to_sfm(self, chapters="all"):
+        # Initialize data.
+        out_text = list()
+        # Add "book" info.
+        out_text.append(
+            f'\\id XXA "{self.name}"; generated by Python module "odt2sfm" on {self.timestamp()}'
+        )
+        out_text.append("\\usfm 3.0")
+
+        # Add lines from lessons.
+        if chapters == "all":
+            chs = self.chapters
+        else:
+            ch_nums = chapters.split(",")
+            ch_nums = [int(n) for n in ch_nums]
+            chs = [self.chapters[i] for i in ch_nums]
+        for chapter in chs:
+            out_text.append(chapter.to_sfm())
+        return "\n".join(out_text)
 
 
 def print_styles(book):

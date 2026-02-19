@@ -1,5 +1,5 @@
 P23 \mt1
-M.T._20_Text_20_-_20_Lesson_20_Title_20_Scrip_20_Reference  \mt2
+M.T._20_Text_20_-_20_Lesson_20_Title_20_Scrip_20_Reference  \m
 Part_20_Heading \ms1
 Table_20_Left_20_headings   \s1
 M.T._20_Text    \m
@@ -21,8 +21,9 @@ Body    \m
 P33 \li1
 P13 \m
 P14 \p
-Bible_20_Story_20_-_20_Graphic_20_Number    \qc
-P8  \p
+T6  \bdit
+#Bible_20_Story_20_-_20_Graphic_20_Number    \qc
+#P8  \p
 P21 \s3
 P35 \li1
 Numbered_20_List    \li1

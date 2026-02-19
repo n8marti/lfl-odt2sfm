@@ -38,8 +38,7 @@ class TestOdtElements(unittest.TestCase):
         LOGGER.setLevel(LOGLEVEL_INIT)
 
     def test_paragraph_children(self):
-        LOGGER.setLevel(logging.DEBUG)
-        self.assertEqual(len(self.chapter.paragraphs[2].children), 7)
+        self.assertEqual(len(self.chapter.paragraphs[2].children), 9)
 
     def test_paragraph_spans(self):
         self.assertEqual(len(self.chapter.all_spans), 7)

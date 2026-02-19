@@ -98,7 +98,7 @@ class TestSfmParagraph(unittest.TestCase):
             self.assertEqual(self.paragraph1.children[i].text, text)
 
     def test_paragraph_children_text_split(self):
-        print(f"{self.p_split_texts.sfm_raw}; {self.p_split_texts.children=}")
+        # print(f"{self.p_split_texts.sfm_raw}; {self.p_split_texts.children=}")
         self.assertEqual(len(self.p_split_texts.children), 6)
 
     def test_paragraph_spans(self):

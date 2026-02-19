@@ -53,11 +53,36 @@ class Conversion:
 
 
 class OdtToSfm(Conversion):
+    """Get formatted text from the files in the source dir and generate the destination SFM file."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        logging.info(f"Evaluating source path: {self.source_path}")
+        self.odt_book = OdtBook(self.source_path)
+        if self.destination_path is not None:
+            logging.info(f"Evaluating destination path: {self.destination_path}")
+            self.sfm_book = SfmBook(self.destination_path)
+
     def run(self):
-        raise NotImplementedError
+        # FIXME: Add any book details here.
+        if self.destination_path:
+            # FIXME: For testing, skip all chapters but Chapter 1.
+            self.destination_path.write_text(self.odt_book.to_sfm(chapters="1"))
+            print(f"SFM data written to {self._destination_path}")
+        else:
+            print(self.odt_book.to_sfm(chapters="1"))
 
 
 class SfmToOdt(Conversion):
+    """Get formatted text from SFM file and create updated ODT files next to the destination dir."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        logging.info(f"Evaluating source path: {self.source_path}")
+        self.sfm_book = SfmBook(self.source_path)
+        logging.info(f"Evaluating destination path: {self.destination_path}")
+        self.odt_book = OdtBook(self.destination_path)
+
     @staticmethod
     def compare_paragraphs(chapters):
         odt_chapter = None
@@ -71,8 +96,8 @@ class SfmToOdt(Conversion):
             if c is None:
                 raise ValueError(f"Invalid chapter type: {type(c)}")
 
-        for i, odt_p in enumerate(odt_chapter.paragraphs):
-            print(f"[{odt_p.style}] {odt_p.text}")
+        for odt_p in odt_chapter.paragraphs:
+            print(f'[{odt_p.style}] "{odt_p.text_recursive}"')
             try:
                 sfm_p = sfm_chapter.paragraphs[i]
             except IndexError:
@@ -82,25 +107,21 @@ class SfmToOdt(Conversion):
                 text = sfm_p.text
             else:
                 style = text = None
-            print(f"[{style}] {text}\n")
+            print(f'[{style}] "{text}"\n')
 
     def run(self):
         """Create updated ODT file(s) based on the data found in the given SFM file."""
-        logging.info(f"Evaluating source path: {self.source_path}")
-        sfm_book = SfmBook(self.source_path)
-        logging.info(f"Evaluating destination path: {self.destination_path}")
-        odt_book = OdtBook(self.destination_path)
+
         new_dest_path = self.destination_path.with_name(
             f"{self.destination_path.name}_updated_{get_timestamp()}"
         )
-        for sfm_chapter in sfm_book.chapters:
-            logging.info(
-                f"Evaluating source chapter: {sfm_chapter.number}: {sfm_chapter.intro}"
-            )
+        for sfm_chapter in self.sfm_book.chapters:
+            logging.info(f"Evaluating SFM chapter: {sfm_chapter.number}")
             # FIXME: For testing, skip all chapters but Chapter 1.
             if sfm_chapter.number != 1:
                 continue
-            odt_chapter = odt_book.chapters.get(sfm_chapter.number)
+            odt_chapter = self.odt_book.chapters.get(sfm_chapter.number)
+            # odt_chapter.all_styles_and_paragraphs()
             # Compare paragraph counts in original data and updated data.
             self._verify_paragraph_count(sfm_chapter, odt_chapter)
             # Ensure that SFM marker is correct for ODT paragraph (or span) style.
@@ -112,6 +133,7 @@ class SfmToOdt(Conversion):
 
             logging.info("Comparing with destination chapter.")
             for i, odt_p in enumerate(odt_chapter.paragraphs):
+                logging.debug(f"Checking paragraph: {odt_p.intro}")
                 odt_p.update_text(sfm_chapter.paragraphs[i])
             odt_chapter.save(odt_new_file)
             print(f'Saved to: "{odt_new_file}"')

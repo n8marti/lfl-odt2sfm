@@ -1,7 +1,7 @@
 import sys
-from odf.opendocument import load
-from odf import text
 from pathlib import Path
+
+from odfdo import Document
 
 
 def show_content(content, all=False):
@@ -21,18 +21,16 @@ def show_content(content, all=False):
 
 def main():
     infile = Path(sys.argv[1])
-    doc = load(infile)
-    content = dict()
-    # styles_to_convert = list()
-    for i, p in enumerate(doc.getElementsByType(text.P)):
-        content[i] = (str(p.getAttribute("stylename")), p)
-        show_content(content, all=True)
-        # if s not in styles_to_convert:
-        #     styles_to_convert.append(s)
-
-    # Save styles list to text file.
-    # outfile = Path("ref.txt")
-    # outfile.write_text(f"{'\n'.join(styles_to_convert)}")
+    doc = Document(infile)
+    footer = None
+    for page in doc.styles.master_pages:
+        footer = page.get_page_footer()
+        if not footer:
+            continue
+        for paragraph in footer.paragraphs:
+            print(
+                f"{page.name}/{footer.tag}/{paragraph.tag}:{paragraph.text_recursive}"
+            )
 
 
 if __name__ == "__main__":
