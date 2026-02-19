@@ -15,3 +15,17 @@
 \p
 \v 1 Yet another verse, but the first one of a new chapter.
 \v 2 This  verse  has a couple of double-spaced splits.
+\c 3
+\mt Chapter title information, etc.
+\s Section Header
+\p
+\v 1 1st verse--nothing fancy.
+\v 2 2nd verse with some \b bolded\b* text. Let’s also add a span with tabs~: \b bold	with	tabs.\b*
+\p
+\v 3 3rd verse, but now 2nd paragraph.
+\s A 2nd Section Header
+\q
+\v 4 Whatever a verse as "q" is (poetry?)
+\s2 "H2" Section Header
+\p
+\v 5 Yet another verse, but the first one of a new section.

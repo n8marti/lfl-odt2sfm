@@ -30,7 +30,7 @@ class TestSfmElements(unittest.TestCase):
 class TestSfmBook(unittest.TestCase):
     def test_chapters(self):
         self.book = SfmBook(BOOK_PATH)
-        self.assertEqual(len(self.book.chapters), 3)
+        self.assertEqual(len(self.book.chapters), 4)
 
     def test_id_text(self):
         self.book = SfmBook(BOOK_PATH)
@@ -74,14 +74,18 @@ class TestSfmChapter(unittest.TestCase):
 
 class TestSfmParagraph(unittest.TestCase):
     def setUp(self):
-        self.paragraph = SfmBook(BOOK_PATH).chapters[1].paragraphs[1]
-        self.p_split_texts = SfmBook(BOOK_PATH).chapters[2].paragraphs[2]
+        self.book = SfmBook(BOOK_PATH)
+        self.chapter1 = self.book.chapters[1]
+        self.chapter2 = self.book.chapters[2]
+        self.paragraph0 = self.chapter1.paragraphs[0]
+        self.paragraph1 = self.chapter1.paragraphs[1]
+        self.p_split_texts = self.chapter2.paragraphs[2]
 
     def test_paragraph_children(self):
-        self.assertEqual(len(self.paragraph.children), 6)
+        self.assertEqual(len(self.paragraph1.children), 6)
         classes = [SfmSpan, SfmText, SfmSpan, SfmText, SfmSpan, SfmText]
         for i, cls in enumerate(classes):
-            self.assertIsInstance(self.paragraph.children[i], cls)
+            self.assertIsInstance(self.paragraph1.children[i], cls)
         texts = [
             "1",
             "1st verse--nothing fancy.",
@@ -91,9 +95,10 @@ class TestSfmParagraph(unittest.TestCase):
             " text.",
         ]
         for i, text in enumerate(texts):
-            self.assertEqual(self.paragraph.children[i].text, text)
+            self.assertEqual(self.paragraph1.children[i].text, text)
 
     def test_paragraph_children_text_split(self):
+        print(f"{self.p_split_texts.sfm_raw}; {self.p_split_texts.children=}")
         self.assertEqual(len(self.p_split_texts.children), 6)
 
     def test_paragraph_spans(self):
@@ -118,9 +123,10 @@ class TestSfmParagraph(unittest.TestCase):
 
     def test_paragraph_text(self):
         self.assertEqual(
-            self.paragraph.text,
+            self.paragraph1.text,
             "1 1st verse--nothing fancy. 2 2nd verse with some  bolded text.",
         )
+        self.assertEqual(self.paragraph0.text, "Section Header")
 
 
 class TestSfmSpan(unittest.TestCase):
