@@ -1,3 +1,4 @@
+import logging
 import sys
 from pathlib import Path
 
@@ -7,6 +8,8 @@ from odt2sfm.conversions import SfmToOdt
 
 
 def main():
+    logging.getLogger().setLevel(logging.DEBUG)
+    # logging.getLogger().setLevel(logging.WARNING)
     conv = SfmToOdt(source=sys.argv[1], destination=sys.argv[2])
     conv.run()
 
