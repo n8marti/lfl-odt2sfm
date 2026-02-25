@@ -3,6 +3,8 @@ import unicodedata
 
 from odfdo import Element, Span
 
+from ..base import do_paratext_replacements
+
 
 class OdtElement:
     def __init__(self, node, chapter=None):
@@ -64,7 +66,7 @@ class OdtElement:
         return unicodedata.normalize(self.normalization_form, text)
 
     def to_sfm(self):
-        pass
+        raise NotImplementedError
 
     def __str__(self):
         return self.text_recursive
@@ -203,6 +205,8 @@ class OdtParagraph(OdtElement):
 
         # Add SFM line.
         if len(line) > 0:
+            # Do Paratext replacements.
+            line = do_paratext_replacements(line)
             lines = line.split("\n")
             # logging.debug(f"{lines=}")
             out_text.extend(lines)

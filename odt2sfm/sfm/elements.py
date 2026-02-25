@@ -1,5 +1,6 @@
 import re
-import unicodedata
+
+from ..base import normalize_text, undo_paratext_replacements
 
 
 class SfmElement:
@@ -8,9 +9,6 @@ class SfmElement:
     NODE_TYPE = "element"
     RE_SFM_INIT = re.compile(r"^\\[a-z]+[0-9]*[ \n]")
     RE_SFM = re.compile(r"(\\[a-z]+[0-9]*[ *])")
-    SFM_PLACEHOLDERS = {
-        "~": "\u00a0",
-    }
 
     def __init__(self, raw_text, odt_style=None, parent=None):
         self._marker = None
@@ -136,14 +134,10 @@ class SfmElement:
         return [c for c in self.children if isinstance(c, SfmText)]
 
     def _normalize(self, text):
-        return unicodedata.normalize(self.normalization_form, text)
+        return normalize_text(self.normalization_form, text)
 
     def _sanitize(self, text):
-        sanitized_text = ""
-        # Replace placeholder characters.
-        for c in text:
-            sanitized_text += self.SFM_PLACEHOLDERS.get(c, c)
-        return sanitized_text
+        return undo_paratext_replacements(text)
 
     def __str__(self):
         return self.sfm_raw
