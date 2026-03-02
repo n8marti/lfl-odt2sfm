@@ -93,7 +93,6 @@ class OdtChapter:
                     continue
                 # Ignore nodes that have no text of their own and have at least
                 # one paragraph with text among their descendants.
-                logging.debug(f"{[c.tail for c in node.children]=}")
                 if (
                     not node.text
                     and not any(c.tail for c in node.children)
