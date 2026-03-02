@@ -15,6 +15,7 @@ class OdtElement:
         self.normalization_form = "NFC"
         if chapter:
             self.chapter = chapter
+        self._path = None
 
     @property
     def intro(self):
@@ -31,12 +32,14 @@ class OdtElement:
 
     @property
     def path(self):
-        node = self.node
-        path = [node.tag if isinstance(node, Element) else str(node)]
-        while node.parent is not None:
-            path.insert(0, node.parent.tag)
-            node = node.parent
-        return "/".join(path)
+        if self._path is None:
+            node = self.node
+            path = [node.tag if isinstance(node, Element) else str(node)]
+            while node.parent is not None:
+                path.insert(0, node.parent.tag)
+                node = node.parent
+            self._path = "/".join(path)
+        return self._path
 
     @property
     def tail(self):
@@ -66,7 +69,7 @@ class OdtElement:
         raise NotImplementedError
 
     def __str__(self):
-        return self.text_recursive
+        return self.intro
 
 
 class OdtText(OdtElement):
@@ -128,10 +131,12 @@ class OdtParagraph(OdtElement):
         super().__init__(*args, **kwargs)
         self._children = None
         self._parent_table = None
+        self._style = None
 
     @property
     def children(self):
         if self._children is None:
+            logging.info(f'Getting children for paragraph "{self}"')
             return self._get_children_from_node(self.node)
         return self._children
 
@@ -145,7 +150,9 @@ class OdtParagraph(OdtElement):
 
     @property
     def style(self):
-        return get_node_doc_style(self.node, self.chapter.odt)
+        if self._style is None:
+            self._style = get_node_doc_style(self.node, self.chapter.odt)
+        return self._style
 
     @property
     def parent_table(self):
@@ -177,7 +184,7 @@ class OdtParagraph(OdtElement):
                     child = OdtText(node.text, node, chapter=self.chapter)
                 accumulator.append(child)
             else:
-                logging.debug(f"Excluding node w/ only space from: {node.tag}")
+                logging.info(f"Excluding node w/ only space from: {node.tag}")
 
         # Evaluate node children if not a Span node, b/c "inner_text" is taken
         # from Span node, so child nodes texts' are already incorporated.
@@ -194,11 +201,12 @@ class OdtParagraph(OdtElement):
                     OdtText(node.tail, node, tail=True, chapter=self.chapter)
                 )
             else:
-                logging.debug(f"Excluding tail w/ only space from: {node.tag}")
+                logging.info(f"Excluding tail w/ only space from: {node.tag}")
 
         return accumulator
 
     def to_sfm(self):
+        logging.debug(f'Generating SFM output for "{self}"')
         out_text = list()
         sfm = self.chapter.sfm_ref.get(self.style)
         line = f"{sfm} "

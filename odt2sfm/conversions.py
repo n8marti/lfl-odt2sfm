@@ -58,16 +58,14 @@ class OdtToSfm(Conversion):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         logging.info(f"Evaluating source path: {self.source_path}")
-        self.odt_book = OdtBook(self.source_path)
-        if self.destination_path is not None:
-            logging.info(f"Evaluating destination path: {self.destination_path}")
-            self.sfm_book = SfmBook(self.destination_path)
+        self.odt_book = OdtBook(self.source_path, filename=self.destination_path.stem)
+        logging.info(f"Evaluating destination path: {self.destination_path}")
+        self.sfm_book = SfmBook(self.destination_path)
 
     def run(self):
         # FIXME: Add any book details here.
         chapters = "all"
         if self.destination_path:
-            # FIXME: For testing, skip all chapters but Chapter 1.
             self.destination_path.write_text(self.odt_book.to_sfm(chapters=chapters))
             print(f"SFM data written to {self._destination_path}")
         else:

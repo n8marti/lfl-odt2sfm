@@ -5,7 +5,6 @@ from pathlib import Path
 from odfdo import Document
 
 from ..base import get_timestamp
-from ..sfm.elements import SfmParagraph
 from .base import get_node_doc_style, node_has_paragraph_descendent_with_text
 from .elements import OdtParagraph
 
@@ -41,6 +40,9 @@ class OdtChapter:
         if self._all_paragraphs is None:
             # NOTE: self.odt.body.headers and .paragraphs exist, but they will not
             # return those elements in the correct, indexable order.
+            logging.info(
+                f'Getting all "paragraphs" ("text:h", "text:p") in "{self.name}".'
+            )
             self._all_paragraphs = [
                 p for p in self._get_elements_by_nstypes(self.odt, ("h", "p"))
             ]
@@ -65,7 +67,7 @@ class OdtChapter:
     @property
     def odt(self):
         if self._odt is None:
-            logging.info(f"Opening file: {self.file_path}")
+            logging.info(f"Reading file: {self.file_path}")
             self._odt = Document(self.file_path)
         return self._odt
 
@@ -74,22 +76,23 @@ class OdtChapter:
         """Return list of user-editable paragraphs."""
 
         if self._paragraphs is None:
+            logging.info(f'Getting translatable paragraphs in "{self.name}"')
             paragraphs = []
             for node in self.all_paragraphs:
                 node_all_text = node.text_recursive
                 node_name = f"{node.tag}:{node.style}"
                 node_desc = f"{node_name}={node_all_text[:30]}..."
                 if len(node_all_text) == 0:
-                    logging.info(f"Skipping non-text node: {node_desc}")
+                    logging.info(f" Skipping non-text node: {node_desc}")
                     continue
                 # Ignore nodes with attachment-only "text".
                 if self.RE_PIC.sub("", node_all_text) == "":
                     logging.info(
-                        f"Skipping node w/ no valid children: {node_name}/{node.children}={node_all_text[:30]}"
+                        f" Skipping node w/ no valid children: {node_name}/{node.children}={node_all_text[:30]}"
                     )
                     continue
                 if get_node_doc_style(node, self.odt) not in self.styles:
-                    logging.info(f"Skipping node w/ ignored style: {node_desc}")
+                    logging.info(f" Skipping node w/ ignored style: {node_desc}")
                     continue
                 # Ignore nodes that have no text of their own and have at least
                 # one paragraph with text among their descendants.
@@ -99,7 +102,7 @@ class OdtChapter:
                     and node_has_paragraph_descendent_with_text(node)
                 ):
                     logging.info(
-                        f"Skipping node whose text comes from a descendent paragraph: {node_name}/{node.children}={node_all_text[:30]}"
+                        f" Skipping node whose text comes from a descendent paragraph: {node_name}/{node.children}={node_all_text[:30]}"
                     )
                     continue
                 # TODO: If node is a table cell paragraph, create/update an
@@ -112,6 +115,9 @@ class OdtChapter:
     @property
     def sfm_ref(self):
         if not self._sfm_ref:
+            logging.info(
+                f"Building SFM reference dict from {self.styles_reference_file}"
+            )
             self._sfm_ref = dict()
             for line in self.styles_reference_file.read_text().splitlines():
                 line = line.strip()
@@ -136,6 +142,7 @@ class OdtChapter:
     @property
     def styles_reference_file(self):
         if self._styles_reference_file is None:
+            logging.info(f'Searching for styles-reference file for "{self.name}"')
             filename = "styles-reference.txt"
             dir_path = self.file_path.parent
             paths = (
@@ -152,7 +159,9 @@ class OdtChapter:
                     break
             if not self._styles_reference_file:
                 raise ValueError("No valid styles-reference.txt found.")
-            logging.debug(f"Using styles reference file: {self._styles_reference_file}")
+            logging.debug(
+                f" Using styles reference file: {self._styles_reference_file}"
+            )
         return self._styles_reference_file
 
     @property
@@ -160,6 +169,7 @@ class OdtChapter:
         """Return list of valid styles for translatable paragraphs and spans."""
 
         if self._styles is None:
+            logging.info(f'Getting valid styles from "{self.name}"')
             styles = dict()
             nodes = [n for n in self.all_paragraphs]
             nodes.extend([n for n in self.all_spans])
@@ -201,9 +211,11 @@ class OdtChapter:
         lock_file = file_path.parent / f".~lock.{self.file_path.name}#"
         if lock_file.is_file():
             raise OSError(f"Can't save; file already open: {self.file_path}")
+        logging.info(f"Saving ODT to: {file_path}")
         self.odt.save(str(file_path))
 
     def to_sfm(self):
+        logging.info(f'Generating SFM output for "{self.name}"')
         # Initialize data.
         out_text = list()
         # Add "chapter" info.
@@ -228,63 +240,15 @@ class OdtChapter:
         return self.name
 
 
-class OdtToc(OdtChapter):
-    RE_LETTER_BEFORE_DIGITS = re.compile(r"(?<=[a-z])[0-9]+")
-    INTRO_MARKERS = (
-        "\\mt",
-        "\\s",
-        "\\p",
-        "\\pi",
-        "\\m",
-        "\\mi",
-        "\\pq",
-        "\\mq",
-        "\\q",
-        "\\b",
-        "\\li",
-    )
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def to_sfm(self):
-        # Initialize data.
-        out_text = list()
-        # Add lines from ODT document.
-        for paragraph in self.paragraphs:
-            # logging.debug(f"{paragraph.text_recursive[:30]=}")
-            # Ignore paragraphs with no style info.
-            if paragraph.style is None:
-                continue
-            # Ignore paragraphs with no text.
-            if len(paragraph.text_recursive) == 0:
-                continue
-
-            sfm_paragraph = SfmParagraph(paragraph.to_sfm())
-
-            sfm_marker_plain = self.RE_LETTER_BEFORE_DIGITS.sub(
-                "", sfm_paragraph.marker
-            )
-            logging.debug(f"{sfm_marker_plain=}")
-            if sfm_marker_plain in self.INTRO_MARKERS:
-                # Get trailing digits.
-                sfm_digits = sfm_paragraph.marker.split(sfm_marker_plain)[1]
-                # Add intro "i" in front of marker.
-                updated_marker = f"\\i{sfm_marker_plain[1:]}{sfm_digits}"
-                logging.debug(f"{updated_marker=}")
-                sfm_paragraph.marker = updated_marker
-
-            out_text.extend(sfm_paragraph.sfm_raw.splitlines())
-
-        return "\n".join(out_text)
-
-
 class OdtBook:
     """The full content of all of "Lessons from Luke" lessons, which is a
     sequence of ODT files in a single parent folder."""
 
-    def __init__(self, dir=None, lang=None):
+    RE_BOOK_ID = re.compile(r"(?<=[0-9])[A-Z]{3}")
+
+    def __init__(self, dir=None, lang=None, filename=None):
         self._dir_path = None
+        self.filename = filename
         self._language = lang
         if dir is None:
             raise ValueError("No folder was given.")
@@ -317,14 +281,13 @@ class OdtBook:
 
     @property
     def chapters(self):
+        logging.info(f'Getting chapters for "{self.name}"')
         chapters = dict()
         chapter_files = sorted(
             [f for f in self.dir_path.iterdir() if f.suffix == ".odt"]
         )
         for lf in chapter_files:
             chapter = OdtChapter(lf)
-            # if chapter.number == 0:
-            #     chapter = OdtToc(lf)
             chapters[chapter.number] = chapter
         return chapters
 
@@ -337,11 +300,16 @@ class OdtBook:
         return get_timestamp()
 
     def to_sfm(self, chapters="all"):
+        logging.info(f'Generating SFM output for "{self.name}"')
         # Initialize data.
         out_text = list()
         # Add "book" info.
+        r = self.RE_BOOK_ID.search(self.filename)
+        logging.debug(f"{r=}")
+        book_id = r[0]
+
         out_text.append(
-            f'\\id XXA "{self.name}"; generated by Python module "odt2sfm" on {self.timestamp()}'
+            f'\\id {book_id} "{self.name}"; generated by Python module "odt2sfm" on {self.timestamp()}'
         )
         out_text.append("\\usfm 3.0")
 
@@ -351,7 +319,6 @@ class OdtBook:
         else:
             ch_nums = chapters.split(",")
             ch_nums = [int(n) for n in ch_nums]
-            # chs = [self.chapters.get(i) for i in ch_nums]
             chs = {i: self.chapters.get(i) for i in ch_nums}
 
         # Handle TOC chapter.
@@ -360,9 +327,6 @@ class OdtBook:
             out_text.extend(toc.to_sfm().splitlines())
         # Handle remaining chapters.
         for n, chapter in chs.items():
-            logging.debug(f"{len(self.chapters)=}")
-            # logging.debug(f"{self.chapters=}")
-            logging.debug(f"{chapter=}")
             out_text.extend(chapter.to_sfm().splitlines())
         # Add final newline.
         out_text.append("")

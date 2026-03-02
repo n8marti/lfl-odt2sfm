@@ -1,3 +1,4 @@
+import argparse
 import logging
 import sys
 from datetime import datetime
@@ -8,35 +9,46 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from odt2sfm.conversions import OdtToSfm, SfmToOdt
 
 
+def parse_args():
+    prog = "odt2sfm"
+    parser = argparse.ArgumentParser(prog=prog)
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        default=False,
+        help="use debug output in log file",
+    )
+    parser.add_argument("source_path", type=Path, help="source file/dir")
+    parser.add_argument("destination_path", type=Path, help="destination file/dir")
+    return parser.parse_args()
+
+
 def main():
+    # Get args.
+    args = parse_args()
+
+    # Set loglevel for logfile.
+    loglevel = logging.INFO
+    if args.debug:
+        loglevel = logging.DEBUG
     logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
-    # logging.getLogger().setLevel(logging.INFO)
-    # logging.getLogger().setLevel(logging.WARNING)
+    logger.setLevel(loglevel)
 
-    source_path = None
-    dest_path = None
-    if len(sys.argv) > 1:
-        source_path = Path(sys.argv[1])
-    else:
-        raise ValueError("Need a source file (SFM) or dir (ODTs).")
-    if len(sys.argv) > 2:
-        dest_path = Path(sys.argv[2])
-
-    if source_path.suffix.lower() == ".sfm":
+    # Evaluate path args.
+    if args.source_path.suffix.lower() == ".sfm":
         conv = SfmToOdt
-    elif source_path.is_dir():
-        logger_filepath = source_path / "odt2sfm.log"
+    elif args.source_path.is_dir():
+        logger_filepath = args.source_path / "odt2sfm.log"
         conv = OdtToSfm
     else:
-        raise ValueError(f"Invalid source: {source_path}")
+        raise ValueError(f"Invalid source: {args.source_path}")
 
     if conv is SfmToOdt:
-        if dest_path is None or not dest_path.is_dir():
+        if not args.destination_path.is_dir():
             raise ValueError(
                 f"{conv} conversion requires a destination dir containing ODT files."
             )
-        logger_filepath = dest_path / "odt2sfm.log"
+        logger_filepath = args.destination_path / "odt2sfm.log"
 
     # Add file handler to logger and remove console logger.
     logfile_handler = logging.FileHandler(logger_filepath)
@@ -47,8 +59,7 @@ def main():
     logging.info(f"Script start time: {datetime.now()}")
 
     # Run converion.
-    c = conv(source=source_path, destination=dest_path)
-    # c.compare_paragraphs((c.sfm_book.chapters[1], c.odt_book.chapters[1]))
+    c = conv(source=args.source_path, destination=args.destination_path)
     c.run()
 
 
