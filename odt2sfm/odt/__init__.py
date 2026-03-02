@@ -65,6 +65,7 @@ class OdtChapter:
     @property
     def odt(self):
         if self._odt is None:
+            logging.info(f"Opening file: {self.file_path}")
             self._odt = Document(self.file_path)
         return self._odt
 
@@ -92,9 +93,10 @@ class OdtChapter:
                     continue
                 # Ignore nodes that have no text of their own and have at least
                 # one paragraph with text among their descendants.
+                logging.debug(f"{[c.tail for c in node.children]=}")
                 if (
                     not node.text
-                    and not node.tail
+                    and not any(c.tail for c in node.children)
                     and node_has_paragraph_descendent_with_text(node)
                 ):
                     logging.info(
