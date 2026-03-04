@@ -139,10 +139,17 @@ class SfmToOdt(Conversion):
     @staticmethod
     def _verify_paragraph_count(sfm_chapter, odt_chapter):
         # Compare paragraph counts in original data and updated data.
-        len_sfm = len(sfm_chapter.paragraphs)
-        len_odt = len(odt_chapter.paragraphs)
+        sfm_ps = sfm_chapter.paragraphs
+        odt_ps = odt_chapter.paragraphs
+        len_sfm = len(sfm_ps)
+        len_odt = len(odt_ps)
         if len_sfm != len_odt:
-            raise ValueError(f"Paragraph counts differ; SFM: {len_sfm}; ODT: {len_odt}")
+            for i, (p1, p2) in enumerate(zip(sfm_ps, odt_ps)):
+                logging.error(f"{i}:SFM: {p1}")
+                logging.error(f"{i}:ODT: {p2}")
+            raise ValueError(
+                f"Paragraph counts differ for ch. {sfm_chapter.number}; SFM: {len_sfm}; ODT: {len_odt}"
+            )
 
     @staticmethod
     def _verify_sfm_markers(sfm_chapter, odt_chapter):

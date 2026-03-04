@@ -2,9 +2,16 @@ import unittest
 from pathlib import Path
 
 from odt2sfm.sfm import SfmBook, SfmChapter
+from odt2sfm.sfm.base import get_sfm_type
 from odt2sfm.sfm.elements import SfmElement, SfmParagraph, SfmSpan, SfmText
 
 BOOK_PATH = Path(__file__).parent / "data" / "book.sfm"
+
+
+class TestSfmBase(unittest.TestCase):
+    def test_get_sfm_type(self):
+        self.assertEqual(get_sfm_type("\\li1"), "li")
+        self.assertIsNone(get_sfm_type("\\999"))
 
 
 class TestSfmElements(unittest.TestCase):

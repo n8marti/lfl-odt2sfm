@@ -4,6 +4,7 @@ import unicodedata
 from odfdo import Element, Span
 
 from ..base import do_paratext_replacements, normalize_text
+from ..sfm.base import SFM_SPAN_TYPES_NO_END_MARKER, get_sfm_type
 from .base import get_node_doc_style
 
 
@@ -16,6 +17,7 @@ class OdtElement:
         if chapter:
             self.chapter = chapter
         self._path = None
+        self._sfm_marker = None
 
     @property
     def intro(self):
@@ -40,6 +42,12 @@ class OdtElement:
                 node = node.parent
             self._path = "/".join(path)
         return self._path
+
+    @property
+    def sfm_marker(self):
+        if self._sfm_marker is None and hasattr(self, "style"):
+            self._sfm_marker = self.chapter.sfm_ref.get(self.style)
+        return self._sfm_marker
 
     @property
     def tail(self):
@@ -99,10 +107,23 @@ class OdtText(OdtElement):
         else:
             self.node.text = value
 
+    def to_sfm(self):
+        return self.text
+
 
 class OdtSpan(OdtElement):
     """A "span" corresponds to the SFM designation of character-level markers;
     e.g. verses, bold, table columns, etc."""
+
+    @property
+    def sfm_marker(self):
+        return super().sfm_marker
+
+    @sfm_marker.setter
+    def sfm_marker(self, value):
+        if not value.startswith("\\"):
+            raise ValueError(f"Invalid SFM marker: {value}")
+        self._sfm_marker = value
 
     @property
     def style(self):
@@ -121,6 +142,24 @@ class OdtSpan(OdtElement):
     def text(self, value):
         self.node.text = value
 
+    def to_sfm(self):
+        # Use span style to get SFM marker.
+        sfm_data = ""
+        sfm = self.sfm_marker
+        if sfm is None:
+            raise ValueError(
+                f'No SFM span style defined for "{self.style}" in {self.chapter.file_path}'
+            )
+        if sfm.endswith("v"):
+            # Add newline before verse marker.
+            sfm_data += "\n"
+        sfm_data += f"{sfm} {self.text}"
+        sfm_type = get_sfm_type(sfm)
+        if sfm_type not in SFM_SPAN_TYPES_NO_END_MARKER:
+            # Add ending marker.
+            sfm_data += f"{sfm}*"
+        return sfm_data
+
 
 class OdtParagraph(OdtElement):
     """A "paragraph" according to the SFM designation, where all markers are
@@ -130,7 +169,6 @@ class OdtParagraph(OdtElement):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._children = None
-        self._parent_table = None
         self._style = None
 
     @property
@@ -153,13 +191,6 @@ class OdtParagraph(OdtElement):
         if self._style is None:
             self._style = get_node_doc_style(self.node, self.chapter.odt)
         return self._style
-
-    @property
-    def parent_table(self):
-        if self._parent_table is None and self.node.parent.tag.startswith("table"):
-            # Parent of node is Cell, whose parent is Row, whose parent is Table.
-            self._parent_table = self.node.parent.parent.parent
-        return self._parent_table
 
     def _get_children_from_node(self, node, accumulator=None, depth=0):
         """Recurively check the node and its child nodes for those that have
@@ -208,7 +239,7 @@ class OdtParagraph(OdtElement):
     def to_sfm(self):
         logging.debug(f'Generating SFM output for "{self}"')
         out_text = list()
-        sfm = self.chapter.sfm_ref.get(self.style)
+        sfm = self.sfm_marker
         line = f"{sfm} "
         prev_child = None
         for child in self.children:
@@ -217,22 +248,7 @@ class OdtParagraph(OdtElement):
                 # Add double-space when following another Text.
                 if isinstance(prev_child, OdtText):
                     line += "  "
-                line += child.text
-            elif isinstance(child, OdtSpan):
-                # Use span style
-                sfm = self.chapter.sfm_ref.get(child.style)
-                if sfm is None:
-                    raise ValueError(
-                        f'No SFM span style defined for "{child.style}" in {self.chapter.file_path}'
-                    )
-                if sfm.endswith("v"):
-                    # Add newline before verse marker.
-                    line += "\n"
-                # logging.debug(f"|{child.text=}|{child.text_recursive=}|")
-                line += f"{sfm} {child.text}"
-                if not sfm.endswith("v"):
-                    # Add ending marker.
-                    line += f"{sfm}*"
+            line += child.to_sfm()
             prev_child = child
 
         # Add SFM line.
@@ -294,3 +310,50 @@ class OdtParagraph(OdtElement):
                     f'Updating OdtSpan "{odt_item.intro}" to "{sfm_item.intro}"'
                 )
                 odt_item.text = sfm_item.text
+
+
+class OdtTableRow(OdtParagraph):
+    """A TableRow is special paragraph whose children are set manually rather
+    than deduced from the node data. All text and styles are found within the
+    children elements."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._children = list()
+        self._parent_table = None
+
+    # TODO: Set correct SFM marker for paragraph.
+    @property
+    def children(self):
+        return self._children
+
+    @property
+    def parent_table(self):
+        if self._parent_table is None:
+            # Parent of table-row node is table node.
+            self._parent_table = self.node.parent._xml_element
+        return self._parent_table
+
+    @property
+    def sfm_marker(self):
+        return "\\tr"
+
+    def add_cell(self, node, column_idx):
+        """Add the "paragraph" node's data to the table row. This can include
+        plain text and span data."""
+        # Hijack OdtParagraph to generate child elements.
+        p = OdtParagraph(node, chapter=self.chapter)
+        # Create/update column-initial element.
+        e = OdtSpan(node, chapter=self.chapter)
+        e.sfm_marker = f"\\tc{column_idx}"
+        children = p.children
+        if len(children) == 0:
+            children.append(e)
+        elif isinstance(children[0], OdtText):
+            e.text = children[0].text
+            children[0] = e
+        else:
+            e.text = ""
+            children.insert(0, e)
+        self.children.extend(children)
+        logging.debug(f"{self.children=}")

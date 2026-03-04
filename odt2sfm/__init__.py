@@ -1,6 +1,6 @@
 import logging
 
 logging.basicConfig(
-    format="%(levelname)s:%(pathname)s:%(lineno)d:%(message)s",
+    format="%(levelname)s: [%(module)s:%(lineno)d:%(funcName)s]: %(message)s",
     level=logging.INFO,
 )

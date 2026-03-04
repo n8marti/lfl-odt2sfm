@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from odt2sfm.odt import OdtChapter
+from odt2sfm.odt.base import get_node_table, get_node_table_pos
 from odt2sfm.odt.elements import OdtParagraph, OdtSpan
 
 CHAPTER_PATH = Path(__file__).parent / "data" / "chapter.odt"
@@ -64,23 +65,12 @@ class TestOdtElements(unittest.TestCase):
         self.assertEqual("bold\twith\ttabs.", self.span_tabs.text)
 
 
-@unittest.skip("Not ready")
 class TestOdtTable(unittest.TestCase):
     def setUp(self):
         self.chapter = OdtChapter(CHAPTER_PATH)
 
-    def test_table_rows(self):
-        for paragraph in self.chapter.all_paragraphs:
-            p = OdtParagraph(paragraph, chapter=self.chapter)
-            if p.parent_table:
-                row_ct = 0
-                for c in p.parent_table.children:
-                    if c.tag == "table:table-row":
-                        row_ct += 1
-                        col_ct = 0
-                        for cell in c.children:
-                            col_ct += 1
-                            for pg in cell.children:
-                                print(
-                                    f"(row {row_ct}, col {col_ct}): {pg.text_recursive}"
-                                )
+    def test_table_row_pos(self):
+        p = self.chapter.all_paragraphs[8]  # 8th paragraph is 1st table cell
+        table = get_node_table(p)
+        self.assertIsNotNone(table)
+        self.assertEqual(get_node_table_pos(p), (0, 0))
