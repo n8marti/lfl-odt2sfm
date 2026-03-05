@@ -43,6 +43,22 @@ def verify_paragraph_count(sfm_chapter, odt_chapter):
         )
 
 
+def verify_paragraph_children_count(sfm_paragraph, odt_paragraph):
+    sfm_children = sfm_paragraph.children
+    odt_children = odt_paragraph.children
+    len_sfm = len(sfm_children)
+    len_odt = len(odt_children)
+    if len_sfm != len_odt:
+        logging.warning(
+            f"Warning: Unmatched children for ODT ({len_odt}) & SFM ({len_sfm}): {odt_paragraph.intro}|{sfm_paragraph.intro}"
+        )
+        for i, (c1, c2) in enumerate(zip(sfm_children, odt_children)):
+            logging.info(f"{i}:SFM: {c1.text}")
+            logging.info(f"{i}:ODT: {c2.text}")
+        return False
+    return True
+
+
 def verify_sfm_markers(sfm_chapter, odt_chapter):
     sfm_paragraphs = [
         p for p in sfm_chapter.paragraphs if p.marker not in SFM_ONLY_MARKERS

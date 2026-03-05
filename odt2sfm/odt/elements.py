@@ -3,7 +3,11 @@ import unicodedata
 
 from odfdo import Element
 
-from ..base import do_paratext_replacements, normalize_text
+from ..base import (
+    do_paratext_replacements,
+    normalize_text,
+    verify_paragraph_children_count,
+)
 from ..sfm.base import SFM_SPAN_TYPES_NO_END_MARKER, get_sfm_type
 from .base import get_node_doc_style
 
@@ -287,21 +291,10 @@ class OdtParagraph(OdtElement):
         and update their data if needed."""
         # Only proceed if overall paragraph text is different.
         if self.text == normalize_text(normalization_mode, sfm_paragraph.text):
-            logging.debug(f"Skipping unchanged paragraph: {sfm_paragraph.intro}")
+            logging.debug(f"Skipping unchanged paragraph: {self.intro}")
             return
 
-        odt_ct = len(self.children)
-        sfm_ct = len(sfm_paragraph.children)
-        if odt_ct != sfm_ct:
-            logging.warning(
-                f"Warning: Unmatched children for ODT ({odt_ct}) & SFM ({sfm_ct}): {self.intro}|{sfm_paragraph.intro}"
-            )
-            logging.debug(
-                [f'{c.__class__.__name__}:"{c.text}":"{c.tail}"' for c in self.children]
-            )
-            logging.debug(
-                [f'{c.__class__.__name__}:"{c.text}"' for c in sfm_paragraph.children]
-            )
+        if not verify_paragraph_children_count(sfm_paragraph, self):
             return
 
         logging.debug(
@@ -310,24 +303,25 @@ class OdtParagraph(OdtElement):
         logging.debug(
             f"XML children: {[f'{c.text=}; {c.tail=}' for c in self.node.children]}"
         )
+        sfm_children = [c for c in sfm_paragraph.children]
         for i, odt_item in enumerate(self.children):
-            sfm_item = sfm_paragraph.children[i]
+            sfm_item = sfm_children[i]
+            sfm_item_normalized_text = normalize_text(normalization_mode, sfm_item.text)
+            if odt_item.text == sfm_item_normalized_text:
+                logging.debug(f"Skipping unchanged paragraph child: {odt_item.intro}")
+                continue
+            item = "Unknown"
+            tail = ""
             if isinstance(odt_item, OdtText):
-                # Set odt_paragraph.text or odt_text.tail value.
-                if not odt_item.is_tail:
-                    logging.info(
-                        f'Updating OdtText "{odt_item.intro}" to "{sfm_item.intro}"'
-                    )
-                else:
-                    logging.info(
-                        f'Updating OdtText tail "{odt_item.tail}" to "{sfm_item.intro}"'
-                    )
-                odt_item.text = normalize_text(normalization_mode, sfm_item.text)
+                item = "OdtText"
+                if odt_item.is_tail:
+                    tail = " tail"
             elif isinstance(odt_item, OdtSpan):
-                logging.info(
-                    f'Updating OdtSpan "{odt_item.intro}" to "{sfm_item.intro}"'
-                )
-                odt_item.text = normalize_text(normalization_mode, sfm_item.text)
+                item = "OdtSpan"
+            logging.info(
+                f'Updating {item}{tail} "{odt_item.text}" to "{sfm_item_normalized_text}"'
+            )
+            odt_item.text = sfm_item_normalized_text
 
 
 class OdtTableRow(OdtParagraph):
