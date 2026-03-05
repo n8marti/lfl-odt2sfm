@@ -1,6 +1,6 @@
 import re
 
-from ..base import normalize_text, undo_paratext_replacements
+from ..base import SFM_TEXT_SEP, normalize_text, undo_paratext_replacements
 
 
 class SfmElement:
@@ -64,11 +64,12 @@ class SfmElement:
             if child:
                 children.append(child)
 
+        # Split text into separate items at each double-space.
         ct = len(children)
         for i, child in enumerate(children.copy()[::-1]):
             idx = ct - 1 - i
             if isinstance(child, SfmText):
-                texts = re.split(r" {2}", child.text)
+                texts = child.text.split(SFM_TEXT_SEP)
                 if len(texts) > 1:
                     children.pop(idx)
                     for text in texts[::-1]:

@@ -6,6 +6,7 @@ SFM_PLACEHOLDERS = {
     "~": "\u00a0",
 }
 SFM_ONLY_MARKERS = ("\\id", "\\rem", "\\usfm")
+SFM_TEXT_SEP = " _"
 
 
 def get_timestamp():
@@ -50,13 +51,12 @@ def verify_paragraph_children_count(sfm_paragraph, odt_paragraph):
     len_odt = len(odt_children)
     if len_sfm != len_odt:
         logging.warning(
-            f"Warning: Unmatched children for ODT ({len_odt}) & SFM ({len_sfm}): {odt_paragraph.intro}|{sfm_paragraph.intro}"
+            f"Unmatched children for ODT ({len_odt}) & SFM ({len_sfm}): {odt_paragraph.intro}|{sfm_paragraph.intro}"
         )
         for i, (c1, c2) in enumerate(zip(sfm_children, odt_children)):
             logging.info(f"{i}:SFM: {c1.text}")
             logging.info(f"{i}:ODT: {c2.text}")
-        return False
-    return True
+    return len_sfm - len_odt
 
 
 def verify_sfm_markers(sfm_chapter, odt_chapter):

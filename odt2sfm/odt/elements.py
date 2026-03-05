@@ -4,6 +4,7 @@ import unicodedata
 from odfdo import Element
 
 from ..base import (
+    SFM_TEXT_SEP,
     do_paratext_replacements,
     normalize_text,
     verify_paragraph_children_count,
@@ -191,6 +192,7 @@ class OdtParagraph(OdtElement):
     def children(self):
         if self._children is None:
             logging.info(f'Getting children for paragraph "{self}"')
+            logging.debug(f"{self.node.children=}")
             return self._get_children_from_node(self.node)
         return self._children
 
@@ -267,10 +269,12 @@ class OdtParagraph(OdtElement):
         prev_child = None
         for child in self.children:
             # logging.debug(f"{line=}")
-            if isinstance(child, OdtText):
-                # Add double-space when following another Text.
-                if isinstance(prev_child, OdtText):
-                    line += "  "
+            if isinstance(child, OdtText) and isinstance(prev_child, OdtText):
+                # Add space-underscore when following another Text.
+                logging.debug(
+                    f"OdtText following other OdtText: {prev_child.text=}; {child.text=}"
+                )
+                line += SFM_TEXT_SEP
             line += child.to_sfm(normalization_mode)
             prev_child = child
 
@@ -294,7 +298,9 @@ class OdtParagraph(OdtElement):
             logging.debug(f"Skipping unchanged paragraph: {self.intro}")
             return
 
-        if not verify_paragraph_children_count(sfm_paragraph, self):
+        extra_sfm_items = verify_paragraph_children_count(sfm_paragraph, self)
+        if extra_sfm_items < 0:
+            logging.error("Can't update text: not enough SFM paragraph child items.")
             return
 
         logging.debug(
