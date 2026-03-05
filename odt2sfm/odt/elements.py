@@ -1,7 +1,7 @@
 import logging
 import unicodedata
 
-from odfdo import Element, Span
+from odfdo import Element
 
 from ..base import do_paratext_replacements, normalize_text
 from ..sfm.base import SFM_SPAN_TYPES_NO_END_MARKER, get_sfm_type
@@ -12,8 +12,6 @@ class OdtElement:
     def __init__(self, node, chapter=None):
         self.node = node
         self.chapter = None
-        # FIXME: Normalization form should come from ODT file somehow.
-        self.normalization_form = "NFC"
         if chapter:
             self.chapter = chapter
         self._path = None
@@ -69,11 +67,11 @@ class OdtElement:
     def text_recursive(self):
         return self.node.text_recursive
 
-    def _normalize(self, text):
+    def _normalize(self, text, mode):
         """Normalize foreign text according to current document preferences."""
-        return unicodedata.normalize(self.normalization_form, text)
+        return unicodedata.normalize(mode, text)
 
-    def to_sfm(self):
+    def to_sfm(self, normalization_mode):
         raise NotImplementedError
 
     def __str__(self):
@@ -107,8 +105,15 @@ class OdtText(OdtElement):
         else:
             self.node.text = value
 
-    def to_sfm(self):
-        return self.text
+    def to_sfm(self, normalization_mode):
+        # Strip any newlines in the text.
+        # e.g.:
+        # - Q1_TOC table, row 1, last column, 1st P: "1:5-25\t\n"
+        # - Q1_L01 verses at top: "Luc 1:5–25\t\n Luc  1:57–64"
+        text = self.text.replace("\n", "")
+        text = do_paratext_replacements(text)
+        text = normalize_text(normalization_mode, text)
+        return text
 
 
 class OdtSpan(OdtElement):
@@ -133,16 +138,16 @@ class OdtSpan(OdtElement):
     def text(self):
         # .inner_text includes child nodes, such as tabs and spacers.
         # FIXME: This seems a bit hacky, but it works well enough for now.
-        if "text:s" or "text:tab" in [c.tag for c in self.node.children]:
-            return self.node.inner_text
-        else:
-            return self.node.text
+        for tag in ("text:s", "text:span", "text:tab"):
+            if tag in [c.tag for c in self.node.children]:
+                return self.node.inner_text
+        return self.node.text
 
     @text.setter
     def text(self, value):
         self.node.text = value
 
-    def to_sfm(self):
+    def to_sfm(self, normalization_mode):
         # Use span style to get SFM marker.
         sfm_data = ""
         sfm = self.sfm_marker
@@ -153,7 +158,14 @@ class OdtSpan(OdtElement):
         if sfm.endswith("v"):
             # Add newline before verse marker.
             sfm_data += "\n"
-        sfm_data += f"{sfm} {self.text}"
+        # Strip any newlines in the text.
+        # e.g.:
+        # - Q1_TOC table, row 1, last column, 1st P: "1:5-25\t\n"
+        # - Q1_L01 verses at top: "Luc 1:5–25\t\n Luc  1:57–64"
+        text = self.text.replace("\n", "")
+        text = do_paratext_replacements(text)
+        text = normalize_text(normalization_mode, text)
+        sfm_data += f"{sfm} {text}"
         sfm_type = get_sfm_type(sfm)
         if sfm_type not in SFM_SPAN_TYPES_NO_END_MARKER:
             # Add ending marker.
@@ -206,16 +218,23 @@ class OdtParagraph(OdtElement):
             accumulator = list()
 
         # We re-interpret text as a "child" for easier looping.
-        if node.text:
-            # Skip space-only nodes.
-            if node.text.replace(" ", "").replace("\t", "") != "":
-                if isinstance(node, Span):
+        if node.tag in ("text:a", "text:span"):
+            # "Flatten" a("address")/span by using "inner_text" to eliminate nested spans.
+            if node.inner_text:
+                # Skip space-only nodes.
+                if node.inner_text.replace(" ", "").replace("\t", "") != "":
                     child = OdtSpan(node, chapter=self.chapter)
+                    accumulator.append(child)
                 else:
+                    logging.info(f"Excluding node w/ only space from: {node.tag}")
+        else:
+            if node.text:
+                # Skip space-only nodes.
+                if node.text.replace(" ", "").replace("\t", "") != "":
                     child = OdtText(node.text, node, chapter=self.chapter)
-                accumulator.append(child)
-            else:
-                logging.info(f"Excluding node w/ only space from: {node.tag}")
+                    accumulator.append(child)
+                else:
+                    logging.info(f"Excluding node w/ only space from: {node.tag}")
 
         # Evaluate node children if not a Span node, b/c "inner_text" is taken
         # from Span node, so child nodes texts' are already incorporated.
@@ -236,7 +255,7 @@ class OdtParagraph(OdtElement):
 
         return accumulator
 
-    def to_sfm(self):
+    def to_sfm(self, normalization_mode):
         logging.debug(f'Generating SFM output for "{self}"')
         out_text = list()
         sfm = self.sfm_marker
@@ -248,7 +267,7 @@ class OdtParagraph(OdtElement):
                 # Add double-space when following another Text.
                 if isinstance(prev_child, OdtText):
                     line += "  "
-            line += child.to_sfm()
+            line += child.to_sfm(normalization_mode)
             prev_child = child
 
         # Add SFM line.
@@ -256,19 +275,18 @@ class OdtParagraph(OdtElement):
             # Do Paratext replacements.
             line = do_paratext_replacements(line)
             # Normalize characters.
-            # FIXME: This should correspond to the Paratext project settings.
-            line = normalize_text("NFD", line)
+            line = normalize_text(normalization_mode, line)
             lines = line.split("\n")
             # logging.debug(f"{lines=}")
             out_text.extend(lines)
 
         return "\n".join(out_text)
 
-    def update_text(self, sfm_paragraph):
+    def update_text(self, sfm_paragraph, normalization_mode):
         """Starting with the paragraph node, recursively check for Text nodes
         and update their data if needed."""
         # Only proceed if overall paragraph text is different.
-        if self.text == self._normalize(sfm_paragraph.text):
+        if self.text == normalize_text(normalization_mode, sfm_paragraph.text):
             logging.debug(f"Skipping unchanged paragraph: {sfm_paragraph.intro}")
             return
 
@@ -304,12 +322,12 @@ class OdtParagraph(OdtElement):
                     logging.info(
                         f'Updating OdtText tail "{odt_item.tail}" to "{sfm_item.intro}"'
                     )
-                odt_item.text = sfm_item.text
+                odt_item.text = normalize_text(normalization_mode, sfm_item.text)
             elif isinstance(odt_item, OdtSpan):
                 logging.info(
                     f'Updating OdtSpan "{odt_item.intro}" to "{sfm_item.intro}"'
                 )
-                odt_item.text = sfm_item.text
+                odt_item.text = normalize_text(normalization_mode, sfm_item.text)
 
 
 class OdtTableRow(OdtParagraph):

@@ -18,6 +18,13 @@ def parse_args():
         default=False,
         help="use debug output in log file",
     )
+    parser.add_argument(
+        "-m",
+        "--normalization-mode",
+        choices=["NFC", "NFD"],
+        default="NFC",
+        help="set character normalization mode for destination file(s)",
+    )
     parser.add_argument("source_path", type=Path, help="source file/dir")
     parser.add_argument("destination_path", type=Path, help="destination file/dir")
     return parser.parse_args()
@@ -38,7 +45,7 @@ def main():
     if args.source_path.suffix.lower() == ".sfm":
         conv = SfmToOdt
     elif args.source_path.is_dir():
-        logger_filepath = args.source_path / "odt2sfm.log"
+        logger_filepath = args.source_path / "odt2sfm-export.log"
         conv = OdtToSfm
     else:
         raise ValueError(f"Invalid source: {args.source_path}")
@@ -48,7 +55,7 @@ def main():
             raise ValueError(
                 f"{conv} conversion requires a destination dir containing ODT files."
             )
-        logger_filepath = args.destination_path / "odt2sfm.log"
+        logger_filepath = args.destination_path / "odt2sfm-import.log"
 
     # Add file handler to logger and remove console logger.
     logfile_handler = logging.FileHandler(logger_filepath)
@@ -59,7 +66,11 @@ def main():
     logging.info(f"Script start time: {datetime.now()}")
 
     # Run converion.
-    c = conv(source=args.source_path, destination=args.destination_path)
+    c = conv(
+        source=args.source_path,
+        destination=args.destination_path,
+        normalization_mode=args.normalization_mode,
+    )
     c.run()
 
 

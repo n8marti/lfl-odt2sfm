@@ -36,6 +36,8 @@ class SfmChapter:
                     raise ValueError(
                         f"No chapter number found after \\c marker: {m[0]}"
                     )
+            elif self.sfm_raw.startswith("\\id"):
+                self._number = 0
         return self._number
 
     @property
@@ -104,13 +106,14 @@ class SfmBook:
     The data is read from the source file. Any changes are written to a new
     destination file."""
 
-    def __init__(self, file_path=None, odt_dir_path=None):
+    def __init__(self, file_path=None, odt_dir_path=None, normalization_mode=None):
         self._chapters = None
         self.file_path = None
         if file_path is not None:
             self.file_path = Path(file_path)
         self._id_text = None
         self._name = None
+        self.normalization_mode = normalization_mode
         self.odt_dir_path = None
         if odt_dir_path is not None:
             self.odt_dir_path = Path(odt_dir_path)

@@ -4,7 +4,12 @@ from pathlib import Path
 
 from odfdo import Document
 
-from ..base import get_timestamp
+from ..base import (
+    SFM_ONLY_MARKERS,
+    get_timestamp,
+    verify_paragraph_count,
+    verify_sfm_markers,
+)
 from .base import (
     get_node_doc_style,
     # get_node_row,
@@ -90,6 +95,13 @@ class OdtChapter:
             paragraphs = []
             # active_table = None
             for node in self.all_paragraphs:
+                for s in ("1:5–25", "1:57–64"):
+                    if s in str(node):
+                        logging.debug(
+                            f"FIXME: {node.text=}; {node.tail}; {node.children=}; {node.text_recursive=}"
+                        )
+                        for c in node.children:
+                            logging.debug(f"FIXME: {c.text=}; {c.tail=}; {c.children=}")
                 node_all_text = node.text_recursive
                 node_name = f"{node.tag}:{node.style}"
                 node_desc = f"{node_name}={node_all_text[:30]}..."
@@ -249,7 +261,7 @@ class OdtChapter:
         logging.info(f"Saving ODT to: {file_path}")
         self.odt.save(str(file_path))
 
-    def to_sfm(self):
+    def to_sfm(self, normalization_mode):
         logging.info(f'Generating SFM output for "{self.name}"')
         # Initialize data.
         out_text = list()
@@ -265,9 +277,17 @@ class OdtChapter:
             if len(paragraph.text_recursive) == 0:
                 continue
 
-            out_text.extend(paragraph.to_sfm().splitlines())
+            out_text.extend(paragraph.to_sfm(normalization_mode).splitlines())
 
         return "\n".join(out_text)
+
+    def update_text(self, sfm_chapter, normalization_mode):
+        sfm_paragraphs = [
+            p for p in sfm_chapter.paragraphs if p.marker not in SFM_ONLY_MARKERS
+        ]
+        for i, odt_p in enumerate(self.paragraphs):
+            logging.debug(f"Checking paragraph: {odt_p.intro}")
+            odt_p.update_text(sfm_paragraphs[i], normalization_mode)
 
     def __str__(self):
         return self.name
@@ -279,7 +299,7 @@ class OdtBook:
 
     RE_BOOK_ID = re.compile(r"(?<=[0-9])[A-Z]{3}")
 
-    def __init__(self, dir=None, lang=None, filename=None):
+    def __init__(self, dir=None, lang=None, filename=None, normalization_mode=None):
         self._dir_path = None
         self.filename = filename
         self._language = lang
@@ -287,6 +307,7 @@ class OdtBook:
             raise ValueError("No folder was given.")
         else:
             self.dir_path = dir
+        self.normalization_mode = normalization_mode
 
     def __str__(self):
         return self.name
@@ -333,6 +354,8 @@ class OdtBook:
         return get_timestamp()
 
     def to_sfm(self, chapters="all"):
+        if self.normalization_mode is None:
+            raise ValueError("Character normalization mode not specified.")
         logging.info(f'Generating SFM output for book "{self.name}"')
         # Initialize data.
         out_text = list()
@@ -358,10 +381,10 @@ class OdtBook:
         # Handle TOC chapter.
         toc = chs.pop(0)
         if toc:
-            out_text.extend(toc.to_sfm().splitlines())
+            out_text.extend(toc.to_sfm(self.normalization_mode).splitlines())
         # Handle remaining chapters.
         for n, chapter in chs.items():
-            out_text.extend(chapter.to_sfm().splitlines())
+            out_text.extend(chapter.to_sfm(self.normalization_mode).splitlines())
 
         logging.debug(f"Writing out {len(out_text)} lines of SFM text data.")
         sfm_text_data = "\n".join(out_text)
@@ -369,3 +392,27 @@ class OdtBook:
         if sfm_text_data[-1] != "\n":
             sfm_text_data += "\n"
         return sfm_text_data
+
+    def update_text(self, sfm_book, new_dest_path):
+        if self.normalization_mode is None:
+            raise ValueError("Character normalization mode not specified.")
+
+        for sfm_chapter in sfm_book.chapters:
+            logging.info(f"Evaluating SFM chapter: {sfm_chapter.number}")
+            odt_chapter = self.chapters.get(sfm_chapter.number)
+            # Compare paragraph counts in original data and updated data.
+            verify_paragraph_count(sfm_chapter, odt_chapter)
+            # Ensure that SFM marker is correct for ODT paragraph (or span) style.
+            verify_sfm_markers(sfm_chapter, odt_chapter)
+            # Ensure updated ODT folder exists.
+            new_dest_path.mkdir(exist_ok=True)
+            # Make copy of original ODT into updated folder.
+            odt_new_file = new_dest_path / odt_chapter.file_path.name
+
+            logging.info("Comparing with destination chapter.")
+            odt_chapter.update_text(sfm_chapter, self.normalization_mode)
+            # for i, odt_p in enumerate(odt_chapter.paragraphs):
+            #     logging.debug(f"Checking paragraph: {odt_p.intro}")
+            #     odt_p.update_text(sfm_chapter.paragraphs[i], self.normalization_mode)
+            odt_chapter.save(odt_new_file)
+            print(f'Saved to: "{odt_new_file}"')

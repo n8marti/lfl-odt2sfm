@@ -9,9 +9,10 @@ from .sfm import SfmBook, SfmChapter
 class Conversion:
     """Base class for ODT-to-SFM or SFM-to-ODT conversions."""
 
-    def __init__(self, source=None, destination=None):
+    def __init__(self, source=None, destination=None, normalization_mode="NFC"):
         self._destination_path = None
         self.destination_format = None
+        self.normalization_mode = normalization_mode
         self._source_path = None
         self.source_format = None
         if destination is not None:
@@ -58,7 +59,11 @@ class OdtToSfm(Conversion):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         logging.info(f"Evaluating source path: {self.source_path}")
-        self.odt_book = OdtBook(self.source_path, filename=self.destination_path.stem)
+        self.odt_book = OdtBook(
+            self.source_path,
+            filename=self.destination_path.stem,
+            normalization_mode=self.normalization_mode,
+        )
         logging.info(f"Evaluating destination path: {self.destination_path}")
         self.sfm_book = SfmBook(self.destination_path)
 
@@ -80,7 +85,9 @@ class SfmToOdt(Conversion):
         logging.info(f"Evaluating source path: {self.source_path}")
         self.sfm_book = SfmBook(self.source_path)
         logging.info(f"Evaluating destination path: {self.destination_path}")
-        self.odt_book = OdtBook(self.destination_path)
+        self.odt_book = OdtBook(
+            self.destination_path, normalization_mode=self.normalization_mode
+        )
 
     @staticmethod
     def compare_paragraphs(chapters):
@@ -114,49 +121,4 @@ class SfmToOdt(Conversion):
         new_dest_path = self.destination_path.with_name(
             f"{self.destination_path.name}_updated_{get_timestamp()}"
         )
-        for sfm_chapter in self.sfm_book.chapters:
-            logging.info(f"Evaluating SFM chapter: {sfm_chapter.number}")
-            # FIXME: For testing, skip all chapters but Chapter 1.
-            if sfm_chapter.number != 1:
-                continue
-            odt_chapter = self.odt_book.chapters.get(sfm_chapter.number)
-            # Compare paragraph counts in original data and updated data.
-            self._verify_paragraph_count(sfm_chapter, odt_chapter)
-            # Ensure that SFM marker is correct for ODT paragraph (or span) style.
-            self._verify_sfm_markers(sfm_chapter, odt_chapter)
-            # Ensure updated ODT folder exists.
-            new_dest_path.mkdir(exist_ok=True)
-            # Make copy of original ODT into updated folder.
-            odt_new_file = new_dest_path / odt_chapter.file_path.name
-
-            logging.info("Comparing with destination chapter.")
-            for i, odt_p in enumerate(odt_chapter.paragraphs):
-                logging.debug(f"Checking paragraph: {odt_p.intro}")
-                odt_p.update_text(sfm_chapter.paragraphs[i])
-            odt_chapter.save(odt_new_file)
-            print(f'Saved to: "{odt_new_file}"')
-
-    @staticmethod
-    def _verify_paragraph_count(sfm_chapter, odt_chapter):
-        # Compare paragraph counts in original data and updated data.
-        sfm_ps = sfm_chapter.paragraphs
-        odt_ps = odt_chapter.paragraphs
-        len_sfm = len(sfm_ps)
-        len_odt = len(odt_ps)
-        if len_sfm != len_odt:
-            for i, (p1, p2) in enumerate(zip(sfm_ps, odt_ps)):
-                logging.error(f"{i}:SFM: {p1}")
-                logging.error(f"{i}:ODT: {p2}")
-            raise ValueError(
-                f"Paragraph counts differ for ch. {sfm_chapter.number}; SFM: {len_sfm}; ODT: {len_odt}"
-            )
-
-    @staticmethod
-    def _verify_sfm_markers(sfm_chapter, odt_chapter):
-        for i, p in enumerate(odt_chapter.paragraphs):
-            sfm = sfm_chapter.paragraphs[i].marker
-            marker = odt_chapter.styles.get(p.style)
-            if marker != sfm:
-                raise ValueError(
-                    f'SFM marker ({sfm}) does not correspond to ODT style ({p.style}) for text "{p.text}"; expected: {marker}'
-                )
+        self.odt_book.update_text(self.sfm_book, new_dest_path)
